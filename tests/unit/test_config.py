@@ -10,6 +10,36 @@ def test_config_defaults():
     assert cfg.mcp.port == 8000
 
 
+def test_allow_agent_defaults_false():
+    from mcp_mikrotik.config import MikrotikConfig
+
+    assert MikrotikConfig().allow_agent is False
+
+
+def test_allow_agent_bare_cli_flag(monkeypatch):
+    """`--allow-agent` must work as a bare flag (no explicit value)."""
+    from mcp_mikrotik.config import MikrotikConfig
+
+    monkeypatch.setattr("sys.argv", ["mcp-server-mikrotik", "--allow-agent"])
+    cfg = MikrotikConfig(_cli_parse_args=True)
+    assert cfg.allow_agent is True
+
+
+def test_allow_agent_omitted_cli_flag(monkeypatch):
+    from mcp_mikrotik.config import MikrotikConfig
+
+    monkeypatch.setattr("sys.argv", ["mcp-server-mikrotik"])
+    cfg = MikrotikConfig(_cli_parse_args=True)
+    assert cfg.allow_agent is False
+
+
+def test_allow_agent_env_override(monkeypatch):
+    from mcp_mikrotik.config import MikrotikConfig
+
+    monkeypatch.setenv("MIKROTIK_ALLOW_AGENT", "true")
+    assert MikrotikConfig().allow_agent is True
+
+
 def test_config_env_overrides(monkeypatch):
     from mcp_mikrotik.config import MikrotikConfig
 

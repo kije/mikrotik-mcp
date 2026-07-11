@@ -26,6 +26,9 @@ class MikrotikConfig(BaseSettings):
         nested_model_default_partial_update=True,
         cli_prog_name="mcp-server-mikrotik",
         cli_kebab_case=True,
+        # Treat boolean options as bare flags: `--allow-agent` sets it True
+        # instead of requiring `--allow-agent true`.
+        cli_implicit_flags=True,
     )
 
     host: str = "127.0.0.1"

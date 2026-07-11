@@ -51,12 +51,31 @@ mcp-server-mikrotik --mcp.transport streamable-http
 | `--username` | SSH username | from config |
 | `--password` | SSH password | from config |
 | `--key-filename` | SSH key filename | from config |
+| `--allow-agent` | Authenticate with keys loaded in the local SSH agent (`ssh-agent` / Pageant). Bare flag — no value needed. | `false` |
 | `--port` | SSH port | `22` |
 | `--mcp.transport` | Transport type: `stdio`, `sse`, `streamable-http` | `stdio` |
 | `--mcp.host` | HTTP server listen address | `0.0.0.0` |
 | `--mcp.port` | HTTP server listen port | `8000` |
 
 HTTP-based transports (`sse`, `streamable-http`) expose a `GET /health` endpoint for health checks. This endpoint is **not available** in `stdio` mode.
+
+#### SSH agent authentication (`--allow-agent`)
+
+Pass `--allow-agent` (or set `MIKROTIK_ALLOW_AGENT=true`) to have the server
+authenticate using the private keys held by your SSH agent instead of a
+password or an on-disk key file. The public part of a loaded key must be
+installed on the RouterOS user (`/user ssh-keys import`).
+
+For this to work the agent must be reachable **by the server process**:
+
+- The `SSH_AUTH_SOCK` environment variable must be present in the server's
+  environment. When the server is launched by an MCP client or run inside a
+  container, that variable is often not inherited — forward it explicitly.
+- The agent must actually hold a key — run `ssh-add -l` to check, and
+  `ssh-add` to load one.
+
+If `--allow-agent` is set but no key can be used, the server logs a warning
+identifying which of these two conditions is unmet.
 
 ## Docker Installation
 
@@ -141,6 +160,7 @@ In the examples below, substitute `ghcr.io/jeff-nasseri/mikrotik-mcp:latest` for
    | `MIKROTIK_HOST` | MikroTik device IP/hostname | `192.168.88.1` |
    | `MIKROTIK_USERNAME` | SSH username | `admin` |
    | `MIKROTIK_PASSWORD` | SSH password | _(empty)_ |
+   | `MIKROTIK_ALLOW_AGENT` | Authenticate with keys from the SSH agent (see [SSH agent authentication](#ssh-agent-authentication---allow-agent)). Requires `SSH_AUTH_SOCK` to be forwarded into the container. | `false` |
    | `MIKROTIK_PORT` | SSH port | `22` |
    | `MIKROTIK_MCP__TRANSPORT` | Transport type: `stdio`, `sse`, `streamable-http` | `stdio` |
    | `MIKROTIK_MCP__HOST` | HTTP server listen address | `0.0.0.0` |

@@ -1,5 +1,7 @@
 import io
 import logging
+import os
+import sys
 from typing import Optional
 
 import paramiko
@@ -44,11 +46,62 @@ class MikroTikSSHClient:
         # safety net: replace unrecognised bytes rather than crashing.
         return data.decode("utf-8", errors="replace")
 
+    def _log_agent_status(self) -> None:
+        """Probe the SSH agent and log its status (diagnostics only).
+
+        paramiko performs the real agent-based authentication itself when
+        ``allow_agent=True`` is passed to ``SSHClient.connect`` — it connects
+        to the agent via ``paramiko.agent.get_agent_connection`` (the
+        ``SSH_AUTH_SOCK`` unix socket on POSIX, or Pageant / OpenSSH agent on
+        Windows). This helper does not authenticate; it simply surfaces the
+        two failure modes that otherwise look identical to "no key found":
+
+          1. ``SSH_AUTH_SOCK`` is not present in the server process's
+             environment (common when the MCP server is spawned by a client
+             or run inside a container that does not forward the agent socket).
+          2. The agent is reachable but holds no identities (``ssh-add`` was
+             never run, or the keys have expired).
+
+        Any error here is swallowed: it must never prevent the real
+        connection attempt below.
+        """
+        sock = os.environ.get("SSH_AUTH_SOCK")
+        if not sock and sys.platform != "win32":
+            logger.warning(
+                "allow_agent is enabled but SSH_AUTH_SOCK is not set in the "
+                "server process's environment, so the SSH agent cannot be "
+                "reached. Ensure the agent socket is forwarded to the MCP "
+                "server process (e.g. inherit SSH_AUTH_SOCK from the shell "
+                "that started it)."
+            )
+            return
+
+        try:
+            agent = paramiko.Agent()
+            try:
+                keys = agent.get_keys()
+            finally:
+                agent.close()
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(f"Could not query the SSH agent: {e}")
+            return
+
+        if not keys:
+            logger.warning(
+                "allow_agent is enabled and the SSH agent is reachable, but "
+                "it exposes no keys. Load a key with 'ssh-add' before "
+                "connecting."
+            )
+        else:
+            logger.info(f"SSH agent exposes {len(keys)} key(s) for authentication")
+
     def connect(self):
         """Establish SSH connection to MikroTik device."""
         try:
             self.client = paramiko.SSHClient()
             self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            if self.allow_agent:
+                self._log_agent_status()
             self.client.connect(
                 hostname=self.host,
                 port=self.port,

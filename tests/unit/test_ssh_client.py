@@ -149,6 +149,123 @@ def test_ssh_client_connect_and_execute(monkeypatch):
     assert state["closed"] == 1
 
 
+# ---------------------------------------------------------------------------
+# SSH agent authentication (--allow-agent)
+# ---------------------------------------------------------------------------
+
+def _dummy_ssh_capturing(state):
+    class DummySSH:
+        def set_missing_host_key_policy(self, _policy):
+            pass
+
+        def connect(self, **kwargs):
+            state["connect_kwargs"] = kwargs
+
+        def close(self):
+            pass
+
+    return DummySSH
+
+
+def test_allow_agent_defaults_off_and_passed_to_paramiko(monkeypatch):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+    import mcp_mikrotik.mikrotik_ssh_client as mod
+
+    state = {}
+    monkeypatch.setattr(mod.paramiko, "SSHClient", lambda: _dummy_ssh_capturing(state)())
+
+    client = MikroTikSSHClient(host="h", username="u", password="p", key_filename=None)
+    assert client.allow_agent is False
+    assert client.connect() is True
+    assert state["connect_kwargs"]["allow_agent"] is False
+
+
+def test_allow_agent_enabled_passed_to_paramiko(monkeypatch):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+    import mcp_mikrotik.mikrotik_ssh_client as mod
+
+    state = {}
+    monkeypatch.setattr(mod.paramiko, "SSHClient", lambda: _dummy_ssh_capturing(state)())
+    # A reachable agent exposing one key.
+    monkeypatch.setenv("SSH_AUTH_SOCK", "/tmp/agent.sock")
+
+    class DummyAgent:
+        def get_keys(self):
+            return ("key1",)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(mod.paramiko, "Agent", lambda: DummyAgent())
+
+    client = MikroTikSSHClient(host="h", username="u", password="", key_filename=None, allow_agent=True)
+    assert client.connect() is True
+    assert state["connect_kwargs"]["allow_agent"] is True
+
+
+def test_allow_agent_warns_when_sock_missing(monkeypatch, caplog):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+    import mcp_mikrotik.mikrotik_ssh_client as mod
+
+    state = {}
+    monkeypatch.setattr(mod.paramiko, "SSHClient", lambda: _dummy_ssh_capturing(state)())
+    monkeypatch.setattr(mod.sys, "platform", "linux")
+    monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
+
+    # Agent must not even be constructed when the socket is absent.
+    def _boom():
+        raise AssertionError("paramiko.Agent should not be created without SSH_AUTH_SOCK")
+
+    monkeypatch.setattr(mod.paramiko, "Agent", _boom)
+
+    client = MikroTikSSHClient(host="h", username="u", password="", key_filename=None, allow_agent=True)
+    with caplog.at_level("WARNING"):
+        assert client.connect() is True
+    assert any("SSH_AUTH_SOCK" in r.message for r in caplog.records)
+
+
+def test_allow_agent_warns_when_agent_has_no_keys(monkeypatch, caplog):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+    import mcp_mikrotik.mikrotik_ssh_client as mod
+
+    state = {}
+    monkeypatch.setattr(mod.paramiko, "SSHClient", lambda: _dummy_ssh_capturing(state)())
+    monkeypatch.setenv("SSH_AUTH_SOCK", "/tmp/agent.sock")
+
+    class EmptyAgent:
+        def get_keys(self):
+            return ()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(mod.paramiko, "Agent", lambda: EmptyAgent())
+
+    client = MikroTikSSHClient(host="h", username="u", password="", key_filename=None, allow_agent=True)
+    with caplog.at_level("WARNING"):
+        assert client.connect() is True
+    assert any("no keys" in r.message for r in caplog.records)
+
+
+def test_agent_probe_failure_does_not_block_connect(monkeypatch):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+    import mcp_mikrotik.mikrotik_ssh_client as mod
+
+    state = {}
+    monkeypatch.setattr(mod.paramiko, "SSHClient", lambda: _dummy_ssh_capturing(state)())
+    monkeypatch.setenv("SSH_AUTH_SOCK", "/tmp/agent.sock")
+
+    def _raise():
+        raise RuntimeError("agent exploded")
+
+    monkeypatch.setattr(mod.paramiko, "Agent", _raise)
+
+    client = MikroTikSSHClient(host="h", username="u", password="", key_filename=None, allow_agent=True)
+    # A broken diagnostic probe must never prevent the real connection attempt.
+    assert client.connect() is True
+    assert state["connect_kwargs"]["allow_agent"] is True
+
+
 def test_ssh_client_returns_stderr_when_no_stdout(monkeypatch):
     from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
     import mcp_mikrotik.mikrotik_ssh_client as mod
