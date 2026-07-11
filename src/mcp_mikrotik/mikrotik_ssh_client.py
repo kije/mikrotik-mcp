@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import io
 import logging
 import os
@@ -9,10 +10,18 @@ import paramiko
 
 logger = logging.getLogger(__name__)
 
+# Mirror the MikrotikConfig defaults. A connection value still equal to its
+# default is treated as "unset", so a matching ~/.ssh/config stanza may supply
+# it; an explicitly-changed value always wins (as `ssh` treats the command
+# line over the config file).
+_DEFAULT_USERNAME = "admin"
+_DEFAULT_PORT = 22
+
+
 class MikroTikSSHClient:
     """SSH client for MikroTik devices."""
 
-    def __init__(self, host: str, username: str, password: str, key_filename: Optional[str], port: int = 22, allow_agent: bool = False):
+    def __init__(self, host: str, username: str, password: str, key_filename: Optional[str], port: int = 22, allow_agent: bool = False, agent_key_fingerprint: Optional[str] = None):
         self.host = host
         self.username = username
         self.password = password
@@ -21,6 +30,7 @@ class MikroTikSSHClient:
         self.channel = None
         self.key_filename = key_filename
         self.allow_agent = allow_agent
+        self.agent_key_fingerprint = agent_key_fingerprint
         self._agent = None
 
     @staticmethod
@@ -113,29 +123,61 @@ class MikroTikSSHClient:
         except (ValueError, IndexError):
             return None
 
-    def _ssh_config_identity_blobs(self) -> set:
-        """Public-key blobs of the ``IdentityFile``(s) configured for this host
-        in ``~/.ssh/config``.
+    def _ssh_config_lookup(self):
+        """Resolved ``~/.ssh/config`` options for this host, or ``None``.
 
-        This lets an agent full of unrelated keys be narrowed to just the
-        identity the user already associates with the device — the same
-        selection ``ssh`` itself performs — so we present one key instead of
-        offering (and getting rejected for) every key in turn.
+        Returns the dict produced by :meth:`paramiko.SSHConfig.lookup` (keys
+        such as ``hostname``, ``user``, ``port``, ``identityfile``) so a single
+        parse serves both connection-parameter resolution and agent-key
+        selection. ``None`` when there is no config file or it cannot be parsed.
         """
         config_path = os.path.expanduser("~/.ssh/config")
         if not os.path.exists(config_path):
-            return set()
+            return None
         try:
             ssh_config = paramiko.SSHConfig()
             with open(config_path) as f:
                 ssh_config.parse(f)
-            host_conf = ssh_config.lookup(self.host)
+            return ssh_config.lookup(self.host)
         except Exception as e:  # pragma: no cover - defensive
             logger.debug(f"Could not parse ~/.ssh/config: {e}")
-            return set()
+            return None
 
+    def _apply_ssh_config_overrides(self, conf) -> None:
+        """Fill unset connection parameters from a matching ``~/.ssh/config``
+        stanza (``HostName`` / ``User`` / ``Port``).
+
+        An explicitly-configured value (one that differs from the MikrotikConfig
+        default) always wins; only defaults are overridden, mirroring how
+        ``ssh`` lets the command line take precedence over the config file.
+        """
+        if not conf:
+            return
+
+        hostname = conf.get("hostname")
+        if hostname and hostname != self.host:
+            logger.info(f"Resolved HostName '{hostname}' for '{self.host}' from ~/.ssh/config")
+            self.host = hostname
+
+        user = conf.get("user")
+        if user and self.username == _DEFAULT_USERNAME:
+            logger.info(f"Using User '{user}' from ~/.ssh/config")
+            self.username = user
+
+        port = conf.get("port")
+        if port and self.port == _DEFAULT_PORT:
+            try:
+                self.port = int(port)
+                logger.info(f"Using Port {self.port} from ~/.ssh/config")
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                pass
+
+    def _identity_blobs(self, conf) -> set:
+        """Public-key blobs of the ``IdentityFile``(s) in the resolved config."""
+        if not conf:
+            return set()
         blobs = set()
-        for identity_file in host_conf.get("identityfile") or []:
+        for identity_file in conf.get("identityfile") or []:
             # IdentityFile normally names the private key; the blob lives in the
             # sibling ".pub". Accept either being given directly.
             for candidate in (f"{identity_file}.pub", identity_file):
@@ -145,29 +187,73 @@ class MikroTikSSHClient:
                     break
         return blobs
 
-    def _select_agent_keys(self, agent_keys: list) -> list:
-        """Narrow the agent keys to those matching the host's configured
-        ``IdentityFile`` when ``~/.ssh/config`` names one.
+    @staticmethod
+    def _fingerprint_matches(blob: bytes, hint: str) -> bool:
+        """Whether a public-key blob matches a user-supplied fingerprint hint.
 
-        Falls back to the full list when the config selects nothing (no entry
-        for the host, or the named identity is not loaded in the agent), so
-        agent auth still works without any SSH config.
+        Accepts the two spellings a user is likely to paste from ``ssh-add -l``
+        / ``ssh-keygen -lf``:
+
+          * SHA-256, base64 (``SHA256:abc…`` or the bare ``abc…``) — the modern
+            default. Compared case-sensitively, ignoring ``=`` padding.
+          * MD5, hex (``MD5:aa:bb:…``, ``aa:bb:…`` or ``aabb…``) — the legacy
+            form. Compared case-insensitively, ignoring colons.
         """
-        wanted = self._ssh_config_identity_blobs()
-        if not wanted:
-            return agent_keys
-        matched = [k for k in agent_keys if k.asbytes() in wanted]
-        if matched:
-            logger.info(
-                f"Selected {len(matched)} agent key(s) matching the "
-                f"IdentityFile for host '{self.host}' in ~/.ssh/config"
+        hint = hint.strip()
+        if not hint:
+            return False
+
+        # MD5 hex: 32 hex chars once the prefix and any colons are removed.
+        md5_candidate = hint[4:] if hint[:4].lower() == "md5:" else hint
+        md5_hex = md5_candidate.replace(":", "").lower()
+        if len(md5_hex) == 32 and all(c in "0123456789abcdef" for c in md5_hex):
+            return md5_hex == hashlib.md5(blob).hexdigest()
+
+        # Otherwise treat as SHA-256 base64.
+        sha_candidate = hint[7:] if hint[:7].lower() == "sha256:" else hint
+        sha = base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
+        return sha_candidate.rstrip("=") == sha
+
+    def _select_agent_keys(self, agent_keys: list, conf=None) -> list:
+        """Narrow the agent keys to the identity the user intends to use.
+
+        Selection precedence:
+          1. ``agent_key_fingerprint`` hint, if it matches a loaded key.
+          2. The host's ``IdentityFile`` in ``~/.ssh/config``, if it matches.
+          3. Otherwise the full list — so agent auth still works with no hint
+             and no SSH config.
+        """
+        if conf is None:
+            conf = self._ssh_config_lookup()
+
+        if self.agent_key_fingerprint:
+            matched = [k for k in agent_keys if self._fingerprint_matches(k.asbytes(), self.agent_key_fingerprint)]
+            if matched:
+                logger.info(
+                    f"Selected {len(matched)} agent key(s) matching fingerprint "
+                    f"hint '{self.agent_key_fingerprint}'"
+                )
+                return matched
+            logger.warning(
+                "agent_key_fingerprint '%s' does not match any key loaded in "
+                "the SSH agent; falling back to other key selection",
+                self.agent_key_fingerprint,
             )
-            return matched
-        logger.debug(
-            "~/.ssh/config names an IdentityFile for host '%s' but no matching "
-            "key is loaded in the agent; offering all agent keys",
-            self.host,
-        )
+
+        wanted = self._identity_blobs(conf)
+        if wanted:
+            matched = [k for k in agent_keys if k.asbytes() in wanted]
+            if matched:
+                logger.info(
+                    f"Selected {len(matched)} agent key(s) matching the "
+                    f"IdentityFile for host '{self.host}' in ~/.ssh/config"
+                )
+                return matched
+            logger.debug(
+                "~/.ssh/config names an IdentityFile for host '%s' but no "
+                "matching key is loaded in the agent; offering all agent keys",
+                self.host,
+            )
         return agent_keys
 
     def _close_agent(self) -> None:
@@ -220,14 +306,20 @@ class MikroTikSSHClient:
         loaded agent with many keys otherwise fails with "Disconnect (code 2)".
         Trying each key on its own connection keeps every attempt within
         RouterOS's per-session limit and stops at the first accepted key.
+
+        ``HostName`` / ``User`` / ``Port`` from a matching ``~/.ssh/config``
+        stanza fill any connection parameter left at its default before the
+        attempt is made.
         """
+        conf = self._ssh_config_lookup()
+        self._apply_ssh_config_overrides(conf)
         try:
             if not self.allow_agent:
                 return self._open(allow_agent=False)
 
             agent_keys = self._get_agent_keys()
             if agent_keys:
-                agent_keys = self._select_agent_keys(agent_keys)
+                agent_keys = self._select_agent_keys(agent_keys, conf)
                 if len(agent_keys) > 3:
                     logger.warning(
                         "%d agent keys will be tried one per connection, so the "

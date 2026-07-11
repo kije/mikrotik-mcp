@@ -20,6 +20,7 @@ def _execute_sync(command: str) -> str:
         key_filename=config.mikrotik_config.key_filename,
         port=config.mikrotik_config.port,
         allow_agent=config.mikrotik_config.allow_agent,
+        agent_key_fingerprint=config.mikrotik_config.agent_key_fingerprint,
     )
 
     try:
@@ -48,6 +49,7 @@ def download_file_sync(filename: str) -> bytes:
         key_filename=config.mikrotik_config.key_filename,
         port=config.mikrotik_config.port,
         allow_agent=config.mikrotik_config.allow_agent,
+        agent_key_fingerprint=config.mikrotik_config.agent_key_fingerprint,
     )
 
     try:
@@ -69,6 +71,7 @@ def upload_file_sync(filename: str, data: bytes) -> None:
         key_filename=config.mikrotik_config.key_filename,
         port=config.mikrotik_config.port,
         allow_agent=config.mikrotik_config.allow_agent,
+        agent_key_fingerprint=config.mikrotik_config.agent_key_fingerprint,
     )
 
     try:

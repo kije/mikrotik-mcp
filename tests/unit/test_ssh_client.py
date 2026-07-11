@@ -415,6 +415,150 @@ def test_no_ssh_config_offers_all_agent_keys(monkeypatch, tmp_path):
     assert [a["pkey"] for a in state["attempts"]] == [key_a, key_b]
 
 
+# ---------------------------------------------------------------------------
+# Agent key selection via fingerprint hint
+# ---------------------------------------------------------------------------
+
+def _sha256_fp(key):
+    import base64, hashlib
+    return "SHA256:" + base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip("=")
+
+
+def _md5_fp(key, with_prefix=True):
+    import hashlib
+    hexd = hashlib.md5(key.asbytes()).hexdigest()
+    colon = ":".join(hexd[i:i + 2] for i in range(0, len(hexd), 2))
+    return ("MD5:" + colon) if with_prefix else colon
+
+
+def test_fingerprint_hint_sha256_selects_key(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, _ = _make_agent_key(b"\x11" * 32)
+    key_b, _ = _make_agent_key(b"\x12" * 32)
+    monkeypatch.setenv("HOME", str(tmp_path))  # no ssh config
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_b)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    client = MikroTikSSHClient(
+        host="10.0.0.4", username="u", password="", key_filename=None,
+        allow_agent=True, agent_key_fingerprint=_sha256_fp(key_b),
+    )
+    assert client.connect() is True
+    assert [a["pkey"] for a in state["attempts"]] == [key_b]
+
+
+def test_fingerprint_hint_md5_selects_key(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, _ = _make_agent_key(b"\x13" * 32)
+    key_b, _ = _make_agent_key(b"\x14" * 32)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_a)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    # Bare MD5 hex (no prefix) must also match.
+    client = MikroTikSSHClient(
+        host="10.0.0.5", username="u", password="", key_filename=None,
+        allow_agent=True, agent_key_fingerprint=_md5_fp(key_a, with_prefix=False),
+    )
+    assert client.connect() is True
+    assert [a["pkey"] for a in state["attempts"]] == [key_a]
+
+
+def test_fingerprint_hint_takes_precedence_over_ssh_config(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, pub_a = _make_agent_key(b"\x15" * 32)
+    key_b, _ = _make_agent_key(b"\x16" * 32)
+    # ssh_config points at key_a, but the fingerprint hint asks for key_b.
+    (tmp_path / "id_a.pub").write_text(pub_a)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _write_ssh_config(tmp_path, "10.0.0.6", str(tmp_path / "id_a"))
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_b)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    client = MikroTikSSHClient(
+        host="10.0.0.6", username="u", password="", key_filename=None,
+        allow_agent=True, agent_key_fingerprint=_sha256_fp(key_b),
+    )
+    assert client.connect() is True
+    assert [a["pkey"] for a in state["attempts"]] == [key_b]
+
+
+def test_fingerprint_hint_no_match_warns_and_falls_back(monkeypatch, tmp_path, caplog):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, _ = _make_agent_key(b"\x17" * 32)
+    key_b, _ = _make_agent_key(b"\x18" * 32)
+    absent_key, _ = _make_agent_key(b"\x19" * 32)  # not loaded in the agent
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_b)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    client = MikroTikSSHClient(
+        host="10.0.0.7", username="u", password="", key_filename=None,
+        allow_agent=True, agent_key_fingerprint=_sha256_fp(absent_key),
+    )
+    with caplog.at_level("WARNING"):
+        assert client.connect() is True
+    # Hint matched nothing -> warn and fall back to trying all keys.
+    assert any("does not match" in r.message for r in caplog.records)
+    assert [a["pkey"] for a in state["attempts"]] == [key_a, key_b]
+
+
+# ---------------------------------------------------------------------------
+# HostName / User / Port resolution from ~/.ssh/config
+# ---------------------------------------------------------------------------
+
+def test_ssh_config_resolves_hostname_user_port(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    ssh_dir = tmp_path / ".ssh"
+    ssh_dir.mkdir()
+    (ssh_dir / "config").write_text(
+        "Host myrouter\n"
+        "  HostName 192.168.88.1\n"
+        "  User netadmin\n"
+        "  Port 2200\n"
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+    state = _install_dummy_ssh(monkeypatch)
+
+    # username/port left at their defaults so the config may fill them in.
+    client = MikroTikSSHClient(host="myrouter", username="admin", password="pw", key_filename=None)
+    assert client.connect() is True
+    assert state["connect_kwargs"]["hostname"] == "192.168.88.1"
+    assert state["connect_kwargs"]["username"] == "netadmin"
+    assert state["connect_kwargs"]["port"] == 2200
+
+
+def test_ssh_config_does_not_override_explicit_values(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    ssh_dir = tmp_path / ".ssh"
+    ssh_dir.mkdir()
+    (ssh_dir / "config").write_text(
+        "Host myrouter\n"
+        "  HostName 192.168.88.1\n"
+        "  User netadmin\n"
+        "  Port 2200\n"
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+    state = _install_dummy_ssh(monkeypatch)
+
+    # Explicit (non-default) username/port must win over the config.
+    client = MikroTikSSHClient(host="myrouter", username="explicit", password="pw", key_filename=None, port=2222)
+    assert client.connect() is True
+    assert state["connect_kwargs"]["hostname"] == "192.168.88.1"  # HostName still resolved
+    assert state["connect_kwargs"]["username"] == "explicit"
+    assert state["connect_kwargs"]["port"] == 2222
+
+
 def test_ssh_client_returns_stderr_when_no_stdout(monkeypatch):
     from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
     import mcp_mikrotik.mikrotik_ssh_client as mod

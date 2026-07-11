@@ -52,6 +52,7 @@ mcp-server-mikrotik --mcp.transport streamable-http
 | `--password` | SSH password | from config |
 | `--key-filename` | SSH key filename | from config |
 | `--allow-agent` | Authenticate with keys loaded in the local SSH agent (`ssh-agent` / Pageant). Bare flag — no value needed. | `false` |
+| `--agent-key-fingerprint` | Hint selecting which agent key to offer, as a fingerprint (`SHA256:…` from `ssh-add -l`, or an MD5 `aa:bb:…`). Only used with `--allow-agent`. | _(none)_ |
 | `--port` | SSH port | `22` |
 | `--mcp.transport` | Transport type: `stdio`, `sse`, `streamable-http` | `stdio` |
 | `--mcp.host` | HTTP server listen address | `0.0.0.0` |
@@ -86,18 +87,50 @@ authentication when those are configured.
 
 **Selecting the right key.** If your agent holds many keys, trying them one by
 one means the device logs several rejected logins before the accepted key is
-reached. To offer only the correct key, add an `IdentityFile` for the device to
-`~/.ssh/config` (readable by the server process):
+reached. There are two ways to offer only the correct key (checked in this
+order):
+
+1. **Fingerprint hint** — pass `--agent-key-fingerprint` with the fingerprint
+   shown by `ssh-add -l` (or `ssh-keygen -lf key.pub`):
+
+   ```
+   mcp-server-mikrotik --allow-agent --agent-key-fingerprint SHA256:AbC…
+   ```
+
+   Both the modern `SHA256:…` (base64) and legacy MD5 `aa:bb:…` (hex) forms are
+   accepted, with or without the `SHA256:`/`MD5:` prefix.
+
+2. **`~/.ssh/config` `IdentityFile`** — add an entry for the device (the file
+   must be readable by the server process):
+
+   ```
+   Host 192.168.88.1
+       IdentityFile ~/.ssh/id_mikrotik
+   ```
+
+   The server matches the configured identity's public key
+   (`~/.ssh/id_mikrotik.pub`) against the keys in the agent and offers just
+   that one. The private key never has to be readable; only the public key and
+   the agent are used.
+
+Either way it becomes a single authentication attempt. With neither set, all
+agent keys are tried one per connection.
+
+**`~/.ssh/config` connection settings.** When the configured host matches a
+stanza in `~/.ssh/config`, its `HostName`, `User` and `Port` also fill any
+connection parameter left at its default — so you can point `MIKROTIK_HOST` at
+an alias:
 
 ```
-Host 192.168.88.1
+Host myrouter
+    HostName 192.168.88.1
+    User admin
+    Port 2200
     IdentityFile ~/.ssh/id_mikrotik
 ```
 
-The server reads `~/.ssh/config`, matches the configured identity's public key
-(`~/.ssh/id_mikrotik.pub`) against the keys in the agent, and offers just that
-one — a single authentication attempt. The private key itself never has to be
-readable; only the public key and the agent are used.
+An explicitly-set `MIKROTIK_USERNAME` / `MIKROTIK_PORT` (any non-default value)
+always takes precedence over the config file.
 
 ## Docker Installation
 
@@ -183,6 +216,7 @@ In the examples below, substitute `ghcr.io/jeff-nasseri/mikrotik-mcp:latest` for
    | `MIKROTIK_USERNAME` | SSH username | `admin` |
    | `MIKROTIK_PASSWORD` | SSH password | _(empty)_ |
    | `MIKROTIK_ALLOW_AGENT` | Authenticate with keys from the SSH agent (see [SSH agent authentication](#ssh-agent-authentication---allow-agent)). Requires `SSH_AUTH_SOCK` to be forwarded into the container. | `false` |
+   | `MIKROTIK_AGENT_KEY_FINGERPRINT` | Fingerprint hint selecting which agent key to offer (`SHA256:…` or MD5 `aa:bb:…`). | _(none)_ |
    | `MIKROTIK_PORT` | SSH port | `22` |
    | `MIKROTIK_MCP__TRANSPORT` | Transport type: `stdio`, `sse`, `streamable-http` | `stdio` |
    | `MIKROTIK_MCP__HOST` | HTTP server listen address | `0.0.0.0` |

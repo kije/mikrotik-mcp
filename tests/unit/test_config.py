@@ -40,6 +40,30 @@ def test_allow_agent_env_override(monkeypatch):
     assert MikrotikConfig().allow_agent is True
 
 
+def test_agent_key_fingerprint_defaults_none():
+    from mcp_mikrotik.config import MikrotikConfig
+
+    assert MikrotikConfig().agent_key_fingerprint is None
+
+
+def test_agent_key_fingerprint_cli_flag(monkeypatch):
+    from mcp_mikrotik.config import MikrotikConfig
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["mcp-server-mikrotik", "--agent-key-fingerprint", "SHA256:abc123"],
+    )
+    cfg = MikrotikConfig(_cli_parse_args=True)
+    assert cfg.agent_key_fingerprint == "SHA256:abc123"
+
+
+def test_agent_key_fingerprint_env_override(monkeypatch):
+    from mcp_mikrotik.config import MikrotikConfig
+
+    monkeypatch.setenv("MIKROTIK_AGENT_KEY_FINGERPRINT", "SHA256:xyz")
+    assert MikrotikConfig().agent_key_fingerprint == "SHA256:xyz"
+
+
 def test_config_env_overrides(monkeypatch):
     from mcp_mikrotik.config import MikrotikConfig
 
