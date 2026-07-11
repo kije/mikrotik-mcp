@@ -84,6 +84,21 @@ makes RouterOS disconnect with `code 2` when the agent holds many keys). If
 every agent key is rejected, it falls back to key-file / password
 authentication when those are configured.
 
+**Selecting the right key.** If your agent holds many keys, trying them one by
+one means the device logs several rejected logins before the accepted key is
+reached. To offer only the correct key, add an `IdentityFile` for the device to
+`~/.ssh/config` (readable by the server process):
+
+```
+Host 192.168.88.1
+    IdentityFile ~/.ssh/id_mikrotik
+```
+
+The server reads `~/.ssh/config`, matches the configured identity's public key
+(`~/.ssh/id_mikrotik.pub`) against the keys in the agent, and offers just that
+one — a single authentication attempt. The private key itself never has to be
+readable; only the public key and the agent are used.
+
 ## Docker Installation
 
 The easiest way to run the MCP MikroTik server is using Docker.

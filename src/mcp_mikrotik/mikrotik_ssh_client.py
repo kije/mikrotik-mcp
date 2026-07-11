@@ -1,3 +1,4 @@
+import base64
 import io
 import logging
 import os
@@ -91,6 +92,84 @@ class MikroTikSSHClient:
             )
         return keys
 
+    @staticmethod
+    def _pubkey_blob_from_file(path: str) -> Optional[bytes]:
+        """Return the wire-format public-key blob stored in an OpenSSH ``.pub``
+        file, or ``None`` if it cannot be read.
+
+        An OpenSSH public-key file is ``<type> <base64-blob> [comment]``; the
+        decoded middle field is exactly what ``paramiko.PKey.asbytes`` returns
+        for the corresponding key, so the two can be compared directly.
+        """
+        try:
+            with open(os.path.expanduser(path)) as f:
+                fields = f.read().split()
+        except OSError:
+            return None
+        if len(fields) < 2:
+            return None
+        try:
+            return base64.b64decode(fields[1])
+        except (ValueError, IndexError):
+            return None
+
+    def _ssh_config_identity_blobs(self) -> set:
+        """Public-key blobs of the ``IdentityFile``(s) configured for this host
+        in ``~/.ssh/config``.
+
+        This lets an agent full of unrelated keys be narrowed to just the
+        identity the user already associates with the device — the same
+        selection ``ssh`` itself performs — so we present one key instead of
+        offering (and getting rejected for) every key in turn.
+        """
+        config_path = os.path.expanduser("~/.ssh/config")
+        if not os.path.exists(config_path):
+            return set()
+        try:
+            ssh_config = paramiko.SSHConfig()
+            with open(config_path) as f:
+                ssh_config.parse(f)
+            host_conf = ssh_config.lookup(self.host)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug(f"Could not parse ~/.ssh/config: {e}")
+            return set()
+
+        blobs = set()
+        for identity_file in host_conf.get("identityfile") or []:
+            # IdentityFile normally names the private key; the blob lives in the
+            # sibling ".pub". Accept either being given directly.
+            for candidate in (f"{identity_file}.pub", identity_file):
+                blob = self._pubkey_blob_from_file(candidate)
+                if blob:
+                    blobs.add(blob)
+                    break
+        return blobs
+
+    def _select_agent_keys(self, agent_keys: list) -> list:
+        """Narrow the agent keys to those matching the host's configured
+        ``IdentityFile`` when ``~/.ssh/config`` names one.
+
+        Falls back to the full list when the config selects nothing (no entry
+        for the host, or the named identity is not loaded in the agent), so
+        agent auth still works without any SSH config.
+        """
+        wanted = self._ssh_config_identity_blobs()
+        if not wanted:
+            return agent_keys
+        matched = [k for k in agent_keys if k.asbytes() in wanted]
+        if matched:
+            logger.info(
+                f"Selected {len(matched)} agent key(s) matching the "
+                f"IdentityFile for host '{self.host}' in ~/.ssh/config"
+            )
+            return matched
+        logger.debug(
+            "~/.ssh/config names an IdentityFile for host '%s' but no matching "
+            "key is loaded in the agent; offering all agent keys",
+            self.host,
+        )
+        return agent_keys
+
     def _close_agent(self) -> None:
         if self._agent is not None:
             try:
@@ -148,6 +227,17 @@ class MikroTikSSHClient:
 
             agent_keys = self._get_agent_keys()
             if agent_keys:
+                agent_keys = self._select_agent_keys(agent_keys)
+                if len(agent_keys) > 3:
+                    logger.warning(
+                        "%d agent keys will be tried one per connection, so the "
+                        "device will log that many rejected logins before the "
+                        "accepted key is found. Add an 'IdentityFile' for host "
+                        "'%s' to ~/.ssh/config (or load fewer keys into the "
+                        "agent) to offer only the correct key.",
+                        len(agent_keys),
+                        self.host,
+                    )
                 logger.info(f"Trying {len(agent_keys)} SSH agent key(s) for authentication")
                 for index, key in enumerate(agent_keys, start=1):
                     if self._open(pkey=key, use_password=False, quiet=True):

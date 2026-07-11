@@ -320,6 +320,101 @@ def test_agent_probe_failure_does_not_block_connect(monkeypatch):
     assert client.connect() is True
 
 
+# ---------------------------------------------------------------------------
+# Agent key selection via ~/.ssh/config IdentityFile
+# ---------------------------------------------------------------------------
+
+def _make_agent_key(seed: bytes):
+    """A fake AgentKey whose asbytes() blob matches its .pub line on disk.
+
+    Returns ``(key, pub_line)`` where ``key.asbytes()`` equals the wire blob
+    encoded in ``pub_line`` — mirroring the real paramiko relationship the
+    selection logic relies on.
+    """
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+
+    priv = Ed25519PrivateKey.from_private_bytes(seed)
+    pub_line = priv.public_key().public_bytes(
+        serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH
+    ).decode()
+    wire_blob = base64.b64decode(pub_line.split()[1])
+
+    class FakeAgentKey:
+        def asbytes(self):
+            return wire_blob
+
+    return FakeAgentKey(), pub_line
+
+
+def _write_ssh_config(home, host, identity_path):
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True, exist_ok=True)
+    (ssh_dir / "config").write_text(
+        f"Host {host}\n  IdentityFile {identity_path}\n  IdentitiesOnly yes\n"
+    )
+
+
+def test_ssh_config_identityfile_narrows_agent_keys(monkeypatch, tmp_path):
+    """Only the agent key matching the host's IdentityFile is offered."""
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, pub_a = _make_agent_key(b"\x01" * 32)
+    key_b, pub_b = _make_agent_key(b"\x02" * 32)
+
+    # Write key_b's public key as the configured identity.
+    id_path = tmp_path / "id_router"
+    (tmp_path / "id_router.pub").write_text(pub_b)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _write_ssh_config(tmp_path, "10.0.0.1", str(id_path))
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_b)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    client = MikroTikSSHClient(host="10.0.0.1", username="u", password="", key_filename=None, allow_agent=True)
+    assert client.connect() is True
+
+    # key_a (not the configured identity) must never be offered.
+    offered = [a["pkey"] for a in state["attempts"]]
+    assert offered == [key_b]
+
+
+def test_ssh_config_no_match_offers_all_agent_keys(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, _ = _make_agent_key(b"\x03" * 32)
+    key_b, _ = _make_agent_key(b"\x04" * 32)
+    # Config references an identity that is NOT loaded in the agent.
+    _, pub_other = _make_agent_key(b"\x05" * 32)
+    (tmp_path / "id_other.pub").write_text(pub_other)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _write_ssh_config(tmp_path, "10.0.0.2", str(tmp_path / "id_other"))
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_b)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    client = MikroTikSSHClient(host="10.0.0.2", username="u", password="", key_filename=None, allow_agent=True)
+    assert client.connect() is True
+    # No narrowing possible -> both keys tried in order.
+    assert [a["pkey"] for a in state["attempts"]] == [key_a, key_b]
+
+
+def test_no_ssh_config_offers_all_agent_keys(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, _ = _make_agent_key(b"\x06" * 32)
+    key_b, _ = _make_agent_key(b"\x07" * 32)
+    monkeypatch.setenv("HOME", str(tmp_path))  # no ~/.ssh/config present
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_b)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    client = MikroTikSSHClient(host="10.0.0.3", username="u", password="", key_filename=None, allow_agent=True)
+    assert client.connect() is True
+    assert [a["pkey"] for a in state["attempts"]] == [key_a, key_b]
+
+
 def test_ssh_client_returns_stderr_when_no_stdout(monkeypatch):
     from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
     import mcp_mikrotik.mikrotik_ssh_client as mod
