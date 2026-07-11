@@ -77,6 +77,13 @@ For this to work the agent must be reachable **by the server process**:
 If `--allow-agent` is set but no key can be used, the server logs a warning
 identifying which of these two conditions is unmet.
 
+RouterOS aborts an SSH session after only a few rejected public keys, so the
+server offers agent identities **one per connection** and stops at the first
+key the device accepts (rather than presenting the whole agent at once, which
+makes RouterOS disconnect with `code 2` when the agent holds many keys). If
+every agent key is rejected, it falls back to key-file / password
+authentication when those are configured.
+
 ## Docker Installation
 
 The easiest way to run the MCP MikroTik server is using Docker.

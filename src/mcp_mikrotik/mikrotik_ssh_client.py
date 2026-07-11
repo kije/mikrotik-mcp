@@ -20,6 +20,7 @@ class MikroTikSSHClient:
         self.channel = None
         self.key_filename = key_filename
         self.allow_agent = allow_agent
+        self._agent = None
 
     @staticmethod
     def _decode_output(data: bytes) -> str:
@@ -46,24 +47,23 @@ class MikroTikSSHClient:
         # safety net: replace unrecognised bytes rather than crashing.
         return data.decode("utf-8", errors="replace")
 
-    def _log_agent_status(self) -> None:
-        """Probe the SSH agent and log its status (diagnostics only).
+    def _get_agent_keys(self):
+        """Return the identities held by the local SSH agent.
 
-        paramiko performs the real agent-based authentication itself when
-        ``allow_agent=True`` is passed to ``SSHClient.connect`` — it connects
-        to the agent via ``paramiko.agent.get_agent_connection`` (the
+        The agent is reached via ``paramiko.agent.get_agent_connection`` (the
         ``SSH_AUTH_SOCK`` unix socket on POSIX, or Pageant / OpenSSH agent on
-        Windows). This helper does not authenticate; it simply surfaces the
-        two failure modes that otherwise look identical to "no key found":
+        Windows). Two failure modes otherwise look identical to "no key found",
+        so each is called out with a targeted warning:
 
           1. ``SSH_AUTH_SOCK`` is not present in the server process's
-             environment (common when the MCP server is spawned by a client
+             environment (common when the server is spawned by an MCP client
              or run inside a container that does not forward the agent socket).
           2. The agent is reachable but holds no identities (``ssh-add`` was
              never run, or the keys have expired).
 
-        Any error here is swallowed: it must never prevent the real
-        connection attempt below.
+        The returned ``AgentKey`` objects sign through the live agent
+        connection, so ``self._agent`` is kept open until :meth:`connect`
+        finishes and closes it via :meth:`_close_agent`.
         """
         sock = os.environ.get("SSH_AUTH_SOCK")
         if not sock and sys.platform != "win32":
@@ -74,48 +74,101 @@ class MikroTikSSHClient:
                 "server process (e.g. inherit SSH_AUTH_SOCK from the shell "
                 "that started it)."
             )
-            return
+            return []
 
         try:
-            agent = paramiko.Agent()
-            try:
-                keys = agent.get_keys()
-            finally:
-                agent.close()
+            self._agent = paramiko.Agent()
         except Exception as e:  # pragma: no cover - defensive
-            logger.warning(f"Could not query the SSH agent: {e}")
-            return
+            logger.warning(f"Could not connect to the SSH agent: {e}")
+            return []
 
+        keys = list(self._agent.get_keys())
         if not keys:
             logger.warning(
                 "allow_agent is enabled and the SSH agent is reachable, but "
                 "it exposes no keys. Load a key with 'ssh-add' before "
                 "connecting."
             )
-        else:
-            logger.info(f"SSH agent exposes {len(keys)} key(s) for authentication")
+        return keys
 
-    def connect(self):
-        """Establish SSH connection to MikroTik device."""
+    def _close_agent(self) -> None:
+        if self._agent is not None:
+            try:
+                self._agent.close()
+            except Exception:  # pragma: no cover - defensive
+                pass
+            self._agent = None
+
+    def _open(self, pkey=None, allow_agent: bool = False, use_password: bool = True, quiet: bool = False) -> bool:
+        """Open a single SSH connection attempt and store the client on success.
+
+        A failed attempt returns ``False`` rather than raising so the caller
+        can move on to the next candidate key. ``quiet`` keeps per-key
+        rejections at debug level to avoid flooding the log during the agent
+        key sweep.
+        """
         try:
-            self.client = paramiko.SSHClient()
-            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            if self.allow_agent:
-                self._log_agent_status()
-            self.client.connect(
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(
                 hostname=self.host,
                 port=self.port,
                 username=self.username,
-                password=self.password,
+                password=self.password if use_password else None,
                 key_filename=self.key_filename,
+                pkey=pkey,
                 look_for_keys=False,
-                allow_agent=self.allow_agent,
-                timeout=10
+                allow_agent=allow_agent,
+                timeout=10,
             )
+            self.client = client
             return True
         except Exception as e:
-            logger.error(f"Failed to connect to MikroTik: {e}")
+            if quiet:
+                logger.debug(f"SSH authentication attempt failed: {e}")
+            else:
+                logger.error(f"Failed to connect to MikroTik: {e}")
             return False
+
+    def connect(self):
+        """Establish SSH connection to MikroTik device.
+
+        With ``allow_agent`` enabled, agent identities are tried one per
+        connection instead of all at once. RouterOS aborts a session after
+        only a few rejected public keys, so offering a whole agent's worth of
+        keys on one connection (paramiko's default ``allow_agent`` behaviour)
+        makes the device disconnect before the accepted key is reached — a
+        loaded agent with many keys otherwise fails with "Disconnect (code 2)".
+        Trying each key on its own connection keeps every attempt within
+        RouterOS's per-session limit and stops at the first accepted key.
+        """
+        try:
+            if not self.allow_agent:
+                return self._open(allow_agent=False)
+
+            agent_keys = self._get_agent_keys()
+            if agent_keys:
+                logger.info(f"Trying {len(agent_keys)} SSH agent key(s) for authentication")
+                for index, key in enumerate(agent_keys, start=1):
+                    if self._open(pkey=key, use_password=False, quiet=True):
+                        logger.info(f"Authenticated with SSH agent key {index}/{len(agent_keys)}")
+                        return True
+                logger.info(
+                    f"All {len(agent_keys)} SSH agent key(s) were rejected by the device"
+                )
+
+            # No agent keys, or every agent key was rejected: fall back to
+            # key-file / password authentication when configured.
+            if self.key_filename or self.password or not agent_keys:
+                return self._open(allow_agent=False)
+
+            logger.error(
+                "Authentication failed: all SSH agent key(s) were rejected and "
+                "no key file or password is configured"
+            )
+            return False
+        finally:
+            self._close_agent()
 
     def execute_command(self, command: str) -> str:
         """Execute a command on MikroTik device using exec_command."""
