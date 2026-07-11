@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class MikroTikSSHClient:
     """SSH client for MikroTik devices."""
 
-    def __init__(self, host: str, username: str, password: str, key_filename: Optional[str], port: int = 22):
+    def __init__(self, host: str, username: str, password: str, key_filename: Optional[str], port: int = 22, allow_agent: bool = False):
         self.host = host
         self.username = username
         self.password = password
@@ -17,6 +17,7 @@ class MikroTikSSHClient:
         self.client = None
         self.channel = None
         self.key_filename = key_filename
+        self.allow_agent = allow_agent
 
     @staticmethod
     def _decode_output(data: bytes) -> str:
@@ -55,7 +56,7 @@ class MikroTikSSHClient:
                 password=self.password,
                 key_filename=self.key_filename,
                 look_for_keys=False,
-                allow_agent=False,
+                allow_agent=self.allow_agent,
                 timeout=10
             )
             return True

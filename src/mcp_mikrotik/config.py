@@ -33,6 +33,7 @@ class MikrotikConfig(BaseSettings):
     password: str = ""
     port: int = 22
     key_filename: Optional[str] = None
+    allow_agent: bool = False
     mcp: McpServerSettings = McpServerSettings()
 
 
