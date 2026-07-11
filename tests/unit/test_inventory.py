@@ -135,6 +135,44 @@ def test_each_call_opens_a_fresh_connection(monkeypatch):
     assert [c.host for c in built] == ["10.0.0.1", "10.0.0.1", "10.0.0.2"]
 
 
+def test_connect_forwards_ssh_agent_settings(monkeypatch):
+    """Per-device SSH agent options reach the SSH client."""
+    import mcp_mikrotik.inventory as inv_mod
+
+    captured = {}
+
+    class FakeSSH:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+        def connect(self):
+            return True
+
+    monkeypatch.setattr(inv_mod, "MikroTikSSHClient", FakeSSH)
+    inv = Inventory([
+        _dev("RouterA", allow_agent=True, agent_key_fingerprint="SHA256:abc")
+    ])
+    inv.connect("RouterA")
+
+    assert captured["allow_agent"] is True
+    assert captured["agent_key_fingerprint"] == "SHA256:abc"
+
+
+def test_single_device_fallback_carries_ssh_agent_settings(monkeypatch):
+    """The flat --allow-agent settings survive the single-device synthesis."""
+    import mcp_mikrotik.config as cfg_mod
+    import mcp_mikrotik.inventory as inv_mod
+
+    monkeypatch.setattr(
+        cfg_mod, "mikrotik_config",
+        MikrotikConfig(host="10.0.0.9", allow_agent=True,
+                       agent_key_fingerprint="SHA256:abc"),
+    )
+    (device,) = inv_mod._load_devices()
+    assert device.allow_agent is True
+    assert device.agent_key_fingerprint == "SHA256:abc"
+
+
 def test_inventory_holds_no_connection_state(monkeypatch):
     """Opening connections must not mutate the inventory.
 

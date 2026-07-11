@@ -86,3 +86,38 @@ def test_rollback_safe_mode_when_not_active(ctx, mock_manager):
     with patch("mcp_mikrotik.scope.safe_mode.get_safe_mode_manager", return_value=mock_manager):
         result = asyncio.run(mikrotik_rollback_safe_mode(ctx))
     assert "not active" in result.lower()
+
+
+def test_safe_mode_enable_forwards_allow_agent(monkeypatch):
+    """SafeModeManager.enable must propagate allow_agent to the SSH client."""
+    import mcp_mikrotik.safe_mode as sm
+
+    captured = {}
+
+    class FakeSSH:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def connect(self):
+            # Return False so enable() short-circuits right after construction,
+            # before it tries to open an interactive shell.
+            return False
+
+    import mcp_mikrotik.inventory as inv_mod
+    from mcp_mikrotik.config import DeviceConfig
+
+    fake = inv_mod.Inventory([
+        DeviceConfig(
+            title="RouterA", host="10.0.0.1",
+            allow_agent=True, agent_key_fingerprint="SHA256:abc",
+        )
+    ])
+    monkeypatch.setattr(inv_mod, "get_inventory", lambda: fake)
+    monkeypatch.setattr(sm, "MikroTikSSHClient", FakeSSH)
+
+    manager = sm.SafeModeManager("RouterA")
+    result = manager.enable()
+
+    assert "Error" in result
+    assert captured["allow_agent"] is True
+    assert captured["agent_key_fingerprint"] == "SHA256:abc"

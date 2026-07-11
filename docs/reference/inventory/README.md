@@ -103,6 +103,8 @@ here too — existing configs keep working unchanged.
 | `username` | no | default `admin` |
 | `password` | no | omit when using `key_filename` |
 | `key_filename` | no | path to an SSH private key (preferred over a password) |
+| `allow_agent` | no | authenticate with keys from the local SSH agent, default `false` — see [SSH agent authentication](../../getting-started/installation.md#ssh-agent-authentication---allow-agent) |
+| `agent_key_fingerprint` | no | fingerprint (`SHA256:…` or MD5 `aa:bb:…`) selecting which agent key to offer; only used with `allow_agent` |
 | `tags` | no | free-form labels, e.g. `[branch, eu]` |
 | `region` | no | free-form label, e.g. `NL` |
 

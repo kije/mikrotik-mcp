@@ -38,6 +38,11 @@ class DeviceConfig(BaseModel):
     username: str = "admin"
     password: str = ""
     key_filename: Optional[str] = None
+    # Authenticate with keys held by the local SSH agent (see
+    # MikroTikSSHClient.connect). agent_key_fingerprint optionally selects the
+    # agent key to offer ("SHA256:…" from `ssh-add -l`, or an MD5 "aa:bb:…").
+    allow_agent: bool = False
+    agent_key_fingerprint: Optional[str] = None
     tags: List[str] = []
     region: Optional[str] = None
 
@@ -56,6 +61,8 @@ class MikrotikConfig(BaseSettings):
         nested_model_default_partial_update=True,
         cli_prog_name="mcp-server-mikrotik",
         cli_kebab_case=True,
+        # Treat boolean options as bare flags: `--allow-agent` / `--read-only`
+        # set them True instead of requiring an explicit `true`.
         cli_implicit_flags=True,
         # The inventory value carries credentials; validation errors must not
         # echo the offending input into logs or tool results.
@@ -69,6 +76,12 @@ class MikrotikConfig(BaseSettings):
     port: int = 22
     key_filename: Optional[str] = None
     read_only: bool = False
+    allow_agent: bool = False
+    # Optional hint selecting which SSH agent key to offer, given as a
+    # fingerprint (e.g. "SHA256:abc…" from `ssh-add -l`, or an MD5 "aa:bb:…").
+    # Only meaningful together with allow_agent. Takes precedence over the
+    # ~/.ssh/config IdentityFile match.
+    agent_key_fingerprint: Optional[str] = None
     mcp: McpServerSettings = McpServerSettings()
 
     # ── Multi-device inventory ─────────────────────────────────────────────

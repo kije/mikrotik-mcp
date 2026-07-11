@@ -131,6 +131,8 @@ class Inventory:
             password=device.password,
             key_filename=device.key_filename,
             port=device.port,
+            allow_agent=device.allow_agent,
+            agent_key_fingerprint=device.agent_key_fingerprint,
         )
         if not client.connect():
             raise ConnectionError(
@@ -251,6 +253,8 @@ def _load_devices() -> List[DeviceConfig]:
             username=cfg.username,
             password=cfg.password,
             key_filename=cfg.key_filename,
+            allow_agent=cfg.allow_agent,
+            agent_key_fingerprint=cfg.agent_key_fingerprint,
         )
     ]
 
