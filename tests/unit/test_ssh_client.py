@@ -149,6 +149,416 @@ def test_ssh_client_connect_and_execute(monkeypatch):
     assert state["closed"] == 1
 
 
+# ---------------------------------------------------------------------------
+# SSH agent authentication (--allow-agent)
+# ---------------------------------------------------------------------------
+
+def _install_dummy_ssh(monkeypatch, accept=None):
+    """Patch paramiko.SSHClient with a fake that records every connect attempt.
+
+    ``accept`` is a predicate over the connect kwargs deciding whether an
+    attempt authenticates; when it returns False the fake raises, mirroring a
+    rejected key. Defaults to accepting every attempt. Returns a state dict
+    with ``attempts`` (all kwargs) and ``connect_kwargs`` (the accepted one).
+    """
+    import paramiko
+    import mcp_mikrotik.mikrotik_ssh_client as mod
+
+    if accept is None:
+        accept = lambda kwargs: True
+
+    state = {"attempts": [], "connect_kwargs": None}
+
+    class DummySSH:
+        def set_missing_host_key_policy(self, _policy):
+            pass
+
+        def connect(self, **kwargs):
+            state["attempts"].append(kwargs)
+            if not accept(kwargs):
+                raise paramiko.ssh_exception.AuthenticationException("rejected")
+            state["connect_kwargs"] = kwargs
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(mod.paramiko, "SSHClient", lambda: DummySSH())
+    return state
+
+
+def _install_dummy_agent(monkeypatch, keys):
+    import mcp_mikrotik.mikrotik_ssh_client as mod
+
+    class DummyAgent:
+        def get_keys(self):
+            return tuple(keys)
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("SSH_AUTH_SOCK", "/tmp/agent.sock")
+    monkeypatch.setattr(mod.paramiko, "Agent", lambda: DummyAgent())
+
+
+def test_allow_agent_defaults_off_uses_plain_connect(monkeypatch):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    state = _install_dummy_ssh(monkeypatch)
+
+    client = MikroTikSSHClient(host="h", username="u", password="p", key_filename=None)
+    assert client.allow_agent is False
+    assert client.connect() is True
+    assert state["connect_kwargs"]["allow_agent"] is False
+    assert state["connect_kwargs"]["pkey"] is None
+    assert state["connect_kwargs"]["password"] == "p"
+
+
+def test_allow_agent_offers_each_key_on_its_own_connection(monkeypatch):
+    """Agent keys are offered one per connection (not all via allow_agent)."""
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    # Only "good" authenticates; "bad1"/"bad2" are rejected.
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") == "good")
+    _install_dummy_agent(monkeypatch, ["bad1", "bad2", "good"])
+
+    client = MikroTikSSHClient(host="h", username="u", password="", key_filename=None, allow_agent=True)
+    assert client.connect() is True
+
+    # Each attempt offered exactly one agent key, never the whole set at once.
+    offered = [a["pkey"] for a in state["attempts"]]
+    assert offered == ["bad1", "bad2", "good"]
+    assert all(a["allow_agent"] is False for a in state["attempts"])
+    # Agent attempts must not also fire off a password auth.
+    assert all(a["password"] is None for a in state["attempts"])
+    assert state["connect_kwargs"]["pkey"] == "good"
+
+
+def test_allow_agent_stops_at_first_accepted_key(monkeypatch):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") == "first")
+    _install_dummy_agent(monkeypatch, ["first", "second"])
+
+    client = MikroTikSSHClient(host="h", username="u", password="", key_filename=None, allow_agent=True)
+    assert client.connect() is True
+    # "second" must never be tried once "first" is accepted.
+    assert [a["pkey"] for a in state["attempts"]] == ["first"]
+
+
+def test_allow_agent_falls_back_to_password_when_all_keys_rejected(monkeypatch):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    # Keys (pkey set) are rejected; the password fallback (pkey is None) works.
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is None)
+    _install_dummy_agent(monkeypatch, ["bad1", "bad2"])
+
+    client = MikroTikSSHClient(host="h", username="u", password="pw", key_filename=None, allow_agent=True)
+    assert client.connect() is True
+    # Last attempt is the password fallback: no pkey, password sent.
+    assert state["connect_kwargs"]["pkey"] is None
+    assert state["connect_kwargs"]["password"] == "pw"
+
+
+def test_allow_agent_fails_when_all_keys_rejected_and_no_password(monkeypatch):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: False)
+    _install_dummy_agent(monkeypatch, ["bad1"])
+
+    client = MikroTikSSHClient(host="h", username="u", password="", key_filename=None, allow_agent=True)
+    assert client.connect() is False
+    # Only the single agent key was tried; no spurious password fallback.
+    assert [a["pkey"] for a in state["attempts"]] == ["bad1"]
+
+
+def test_allow_agent_warns_when_sock_missing(monkeypatch, caplog):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+    import mcp_mikrotik.mikrotik_ssh_client as mod
+
+    state = _install_dummy_ssh(monkeypatch)
+    monkeypatch.setattr(mod.sys, "platform", "linux")
+    monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
+
+    # Agent must not even be constructed when the socket is absent.
+    def _boom():
+        raise AssertionError("paramiko.Agent should not be created without SSH_AUTH_SOCK")
+
+    monkeypatch.setattr(mod.paramiko, "Agent", _boom)
+
+    client = MikroTikSSHClient(host="h", username="u", password="", key_filename=None, allow_agent=True)
+    with caplog.at_level("WARNING"):
+        assert client.connect() is True  # falls back to plain connect
+    assert any("SSH_AUTH_SOCK" in r.message for r in caplog.records)
+
+
+def test_allow_agent_warns_when_agent_has_no_keys(monkeypatch, caplog):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    _install_dummy_ssh(monkeypatch)
+    _install_dummy_agent(monkeypatch, [])
+
+    client = MikroTikSSHClient(host="h", username="u", password="", key_filename=None, allow_agent=True)
+    with caplog.at_level("WARNING"):
+        assert client.connect() is True
+    assert any("no keys" in r.message for r in caplog.records)
+
+
+def test_agent_probe_failure_does_not_block_connect(monkeypatch):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+    import mcp_mikrotik.mikrotik_ssh_client as mod
+
+    _install_dummy_ssh(monkeypatch)
+    monkeypatch.setenv("SSH_AUTH_SOCK", "/tmp/agent.sock")
+
+    def _raise():
+        raise RuntimeError("agent exploded")
+
+    monkeypatch.setattr(mod.paramiko, "Agent", _raise)
+
+    client = MikroTikSSHClient(host="h", username="u", password="", key_filename=None, allow_agent=True)
+    # A broken agent probe must never prevent the fallback connection attempt.
+    assert client.connect() is True
+
+
+# ---------------------------------------------------------------------------
+# Agent key selection via ~/.ssh/config IdentityFile
+# ---------------------------------------------------------------------------
+
+def _make_agent_key(seed: bytes):
+    """A fake AgentKey whose asbytes() blob matches its .pub line on disk.
+
+    Returns ``(key, pub_line)`` where ``key.asbytes()`` equals the wire blob
+    encoded in ``pub_line`` — mirroring the real paramiko relationship the
+    selection logic relies on.
+    """
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+
+    priv = Ed25519PrivateKey.from_private_bytes(seed)
+    pub_line = priv.public_key().public_bytes(
+        serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH
+    ).decode()
+    wire_blob = base64.b64decode(pub_line.split()[1])
+
+    class FakeAgentKey:
+        def asbytes(self):
+            return wire_blob
+
+    return FakeAgentKey(), pub_line
+
+
+def _write_ssh_config(home, host, identity_path):
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True, exist_ok=True)
+    (ssh_dir / "config").write_text(
+        f"Host {host}\n  IdentityFile {identity_path}\n  IdentitiesOnly yes\n"
+    )
+
+
+def test_ssh_config_identityfile_narrows_agent_keys(monkeypatch, tmp_path):
+    """Only the agent key matching the host's IdentityFile is offered."""
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, pub_a = _make_agent_key(b"\x01" * 32)
+    key_b, pub_b = _make_agent_key(b"\x02" * 32)
+
+    # Write key_b's public key as the configured identity.
+    id_path = tmp_path / "id_router"
+    (tmp_path / "id_router.pub").write_text(pub_b)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _write_ssh_config(tmp_path, "10.0.0.1", str(id_path))
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_b)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    client = MikroTikSSHClient(host="10.0.0.1", username="u", password="", key_filename=None, allow_agent=True)
+    assert client.connect() is True
+
+    # key_a (not the configured identity) must never be offered.
+    offered = [a["pkey"] for a in state["attempts"]]
+    assert offered == [key_b]
+
+
+def test_ssh_config_no_match_offers_all_agent_keys(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, _ = _make_agent_key(b"\x03" * 32)
+    key_b, _ = _make_agent_key(b"\x04" * 32)
+    # Config references an identity that is NOT loaded in the agent.
+    _, pub_other = _make_agent_key(b"\x05" * 32)
+    (tmp_path / "id_other.pub").write_text(pub_other)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _write_ssh_config(tmp_path, "10.0.0.2", str(tmp_path / "id_other"))
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_b)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    client = MikroTikSSHClient(host="10.0.0.2", username="u", password="", key_filename=None, allow_agent=True)
+    assert client.connect() is True
+    # No narrowing possible -> both keys tried in order.
+    assert [a["pkey"] for a in state["attempts"]] == [key_a, key_b]
+
+
+def test_no_ssh_config_offers_all_agent_keys(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, _ = _make_agent_key(b"\x06" * 32)
+    key_b, _ = _make_agent_key(b"\x07" * 32)
+    monkeypatch.setenv("HOME", str(tmp_path))  # no ~/.ssh/config present
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_b)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    client = MikroTikSSHClient(host="10.0.0.3", username="u", password="", key_filename=None, allow_agent=True)
+    assert client.connect() is True
+    assert [a["pkey"] for a in state["attempts"]] == [key_a, key_b]
+
+
+# ---------------------------------------------------------------------------
+# Agent key selection via fingerprint hint
+# ---------------------------------------------------------------------------
+
+def _sha256_fp(key):
+    import base64, hashlib
+    return "SHA256:" + base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip("=")
+
+
+def _md5_fp(key, with_prefix=True):
+    import hashlib
+    hexd = hashlib.md5(key.asbytes()).hexdigest()
+    colon = ":".join(hexd[i:i + 2] for i in range(0, len(hexd), 2))
+    return ("MD5:" + colon) if with_prefix else colon
+
+
+def test_fingerprint_hint_sha256_selects_key(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, _ = _make_agent_key(b"\x11" * 32)
+    key_b, _ = _make_agent_key(b"\x12" * 32)
+    monkeypatch.setenv("HOME", str(tmp_path))  # no ssh config
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_b)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    client = MikroTikSSHClient(
+        host="10.0.0.4", username="u", password="", key_filename=None,
+        allow_agent=True, agent_key_fingerprint=_sha256_fp(key_b),
+    )
+    assert client.connect() is True
+    assert [a["pkey"] for a in state["attempts"]] == [key_b]
+
+
+def test_fingerprint_hint_md5_selects_key(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, _ = _make_agent_key(b"\x13" * 32)
+    key_b, _ = _make_agent_key(b"\x14" * 32)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_a)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    # Bare MD5 hex (no prefix) must also match.
+    client = MikroTikSSHClient(
+        host="10.0.0.5", username="u", password="", key_filename=None,
+        allow_agent=True, agent_key_fingerprint=_md5_fp(key_a, with_prefix=False),
+    )
+    assert client.connect() is True
+    assert [a["pkey"] for a in state["attempts"]] == [key_a]
+
+
+def test_fingerprint_hint_takes_precedence_over_ssh_config(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, pub_a = _make_agent_key(b"\x15" * 32)
+    key_b, _ = _make_agent_key(b"\x16" * 32)
+    # ssh_config points at key_a, but the fingerprint hint asks for key_b.
+    (tmp_path / "id_a.pub").write_text(pub_a)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _write_ssh_config(tmp_path, "10.0.0.6", str(tmp_path / "id_a"))
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_b)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    client = MikroTikSSHClient(
+        host="10.0.0.6", username="u", password="", key_filename=None,
+        allow_agent=True, agent_key_fingerprint=_sha256_fp(key_b),
+    )
+    assert client.connect() is True
+    assert [a["pkey"] for a in state["attempts"]] == [key_b]
+
+
+def test_fingerprint_hint_no_match_warns_and_falls_back(monkeypatch, tmp_path, caplog):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    key_a, _ = _make_agent_key(b"\x17" * 32)
+    key_b, _ = _make_agent_key(b"\x18" * 32)
+    absent_key, _ = _make_agent_key(b"\x19" * 32)  # not loaded in the agent
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    state = _install_dummy_ssh(monkeypatch, accept=lambda kw: kw.get("pkey") is key_b)
+    _install_dummy_agent(monkeypatch, [key_a, key_b])
+
+    client = MikroTikSSHClient(
+        host="10.0.0.7", username="u", password="", key_filename=None,
+        allow_agent=True, agent_key_fingerprint=_sha256_fp(absent_key),
+    )
+    with caplog.at_level("WARNING"):
+        assert client.connect() is True
+    # Hint matched nothing -> warn and fall back to trying all keys.
+    assert any("does not match" in r.message for r in caplog.records)
+    assert [a["pkey"] for a in state["attempts"]] == [key_a, key_b]
+
+
+# ---------------------------------------------------------------------------
+# HostName / User / Port resolution from ~/.ssh/config
+# ---------------------------------------------------------------------------
+
+def test_ssh_config_resolves_hostname_user_port(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    ssh_dir = tmp_path / ".ssh"
+    ssh_dir.mkdir()
+    (ssh_dir / "config").write_text(
+        "Host myrouter\n"
+        "  HostName 192.168.88.1\n"
+        "  User netadmin\n"
+        "  Port 2200\n"
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+    state = _install_dummy_ssh(monkeypatch)
+
+    # username/port left at their defaults so the config may fill them in.
+    client = MikroTikSSHClient(host="myrouter", username="admin", password="pw", key_filename=None)
+    assert client.connect() is True
+    assert state["connect_kwargs"]["hostname"] == "192.168.88.1"
+    assert state["connect_kwargs"]["username"] == "netadmin"
+    assert state["connect_kwargs"]["port"] == 2200
+
+
+def test_ssh_config_does_not_override_explicit_values(monkeypatch, tmp_path):
+    from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
+
+    ssh_dir = tmp_path / ".ssh"
+    ssh_dir.mkdir()
+    (ssh_dir / "config").write_text(
+        "Host myrouter\n"
+        "  HostName 192.168.88.1\n"
+        "  User netadmin\n"
+        "  Port 2200\n"
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+    state = _install_dummy_ssh(monkeypatch)
+
+    # Explicit (non-default) username/port must win over the config.
+    client = MikroTikSSHClient(host="myrouter", username="explicit", password="pw", key_filename=None, port=2222)
+    assert client.connect() is True
+    assert state["connect_kwargs"]["hostname"] == "192.168.88.1"  # HostName still resolved
+    assert state["connect_kwargs"]["username"] == "explicit"
+    assert state["connect_kwargs"]["port"] == 2222
+
+
 def test_ssh_client_returns_stderr_when_no_stdout(monkeypatch):
     from mcp_mikrotik.mikrotik_ssh_client import MikroTikSSHClient
     import mcp_mikrotik.mikrotik_ssh_client as mod

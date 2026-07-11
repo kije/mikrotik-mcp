@@ -51,12 +51,86 @@ mcp-server-mikrotik --mcp.transport streamable-http
 | `--username` | SSH username | from config |
 | `--password` | SSH password | from config |
 | `--key-filename` | SSH key filename | from config |
+| `--allow-agent` | Authenticate with keys loaded in the local SSH agent (`ssh-agent` / Pageant). Bare flag — no value needed. | `false` |
+| `--agent-key-fingerprint` | Hint selecting which agent key to offer, as a fingerprint (`SHA256:…` from `ssh-add -l`, or an MD5 `aa:bb:…`). Only used with `--allow-agent`. | _(none)_ |
 | `--port` | SSH port | `22` |
 | `--mcp.transport` | Transport type: `stdio`, `sse`, `streamable-http` | `stdio` |
 | `--mcp.host` | HTTP server listen address | `0.0.0.0` |
 | `--mcp.port` | HTTP server listen port | `8000` |
 
 HTTP-based transports (`sse`, `streamable-http`) expose a `GET /health` endpoint for health checks. This endpoint is **not available** in `stdio` mode.
+
+#### SSH agent authentication (`--allow-agent`)
+
+Pass `--allow-agent` (or set `MIKROTIK_ALLOW_AGENT=true`) to have the server
+authenticate using the private keys held by your SSH agent instead of a
+password or an on-disk key file. The public part of a loaded key must be
+installed on the RouterOS user (`/user ssh-keys import`).
+
+For this to work the agent must be reachable **by the server process**:
+
+- The `SSH_AUTH_SOCK` environment variable must be present in the server's
+  environment. When the server is launched by an MCP client or run inside a
+  container, that variable is often not inherited — forward it explicitly.
+- The agent must actually hold a key — run `ssh-add -l` to check, and
+  `ssh-add` to load one.
+
+If `--allow-agent` is set but no key can be used, the server logs a warning
+identifying which of these two conditions is unmet.
+
+RouterOS aborts an SSH session after only a few rejected public keys, so the
+server offers agent identities **one per connection** and stops at the first
+key the device accepts (rather than presenting the whole agent at once, which
+makes RouterOS disconnect with `code 2` when the agent holds many keys). If
+every agent key is rejected, it falls back to key-file / password
+authentication when those are configured.
+
+**Selecting the right key.** If your agent holds many keys, trying them one by
+one means the device logs several rejected logins before the accepted key is
+reached. There are two ways to offer only the correct key (checked in this
+order):
+
+1. **Fingerprint hint** — pass `--agent-key-fingerprint` with the fingerprint
+   shown by `ssh-add -l` (or `ssh-keygen -lf key.pub`):
+
+   ```
+   mcp-server-mikrotik --allow-agent --agent-key-fingerprint SHA256:AbC…
+   ```
+
+   Both the modern `SHA256:…` (base64) and legacy MD5 `aa:bb:…` (hex) forms are
+   accepted, with or without the `SHA256:`/`MD5:` prefix.
+
+2. **`~/.ssh/config` `IdentityFile`** — add an entry for the device (the file
+   must be readable by the server process):
+
+   ```
+   Host 192.168.88.1
+       IdentityFile ~/.ssh/id_mikrotik
+   ```
+
+   The server matches the configured identity's public key
+   (`~/.ssh/id_mikrotik.pub`) against the keys in the agent and offers just
+   that one. The private key never has to be readable; only the public key and
+   the agent are used.
+
+Either way it becomes a single authentication attempt. With neither set, all
+agent keys are tried one per connection.
+
+**`~/.ssh/config` connection settings.** When the configured host matches a
+stanza in `~/.ssh/config`, its `HostName`, `User` and `Port` also fill any
+connection parameter left at its default — so you can point `MIKROTIK_HOST` at
+an alias:
+
+```
+Host myrouter
+    HostName 192.168.88.1
+    User admin
+    Port 2200
+    IdentityFile ~/.ssh/id_mikrotik
+```
+
+An explicitly-set `MIKROTIK_USERNAME` / `MIKROTIK_PORT` (any non-default value)
+always takes precedence over the config file.
 
 ## Docker Installation
 
@@ -141,6 +215,8 @@ In the examples below, substitute `ghcr.io/jeff-nasseri/mikrotik-mcp:latest` for
    | `MIKROTIK_HOST` | MikroTik device IP/hostname | `192.168.88.1` |
    | `MIKROTIK_USERNAME` | SSH username | `admin` |
    | `MIKROTIK_PASSWORD` | SSH password | _(empty)_ |
+   | `MIKROTIK_ALLOW_AGENT` | Authenticate with keys from the SSH agent (see [SSH agent authentication](#ssh-agent-authentication---allow-agent)). Requires `SSH_AUTH_SOCK` to be forwarded into the container. | `false` |
+   | `MIKROTIK_AGENT_KEY_FINGERPRINT` | Fingerprint hint selecting which agent key to offer (`SHA256:…` or MD5 `aa:bb:…`). | _(none)_ |
    | `MIKROTIK_PORT` | SSH port | `22` |
    | `MIKROTIK_MCP__TRANSPORT` | Transport type: `stdio`, `sse`, `streamable-http` | `stdio` |
    | `MIKROTIK_MCP__HOST` | HTTP server listen address | `0.0.0.0` |

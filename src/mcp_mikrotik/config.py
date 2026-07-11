@@ -26,6 +26,9 @@ class MikrotikConfig(BaseSettings):
         nested_model_default_partial_update=True,
         cli_prog_name="mcp-server-mikrotik",
         cli_kebab_case=True,
+        # Treat boolean options as bare flags: `--allow-agent` sets it True
+        # instead of requiring `--allow-agent true`.
+        cli_implicit_flags=True,
     )
 
     host: str = "127.0.0.1"
@@ -33,6 +36,12 @@ class MikrotikConfig(BaseSettings):
     password: str = ""
     port: int = 22
     key_filename: Optional[str] = None
+    allow_agent: bool = False
+    # Optional hint selecting which SSH agent key to offer, given as a
+    # fingerprint (e.g. "SHA256:abc…" from `ssh-add -l`, or an MD5 "aa:bb:…").
+    # Only meaningful together with allow_agent. Takes precedence over the
+    # ~/.ssh/config IdentityFile match.
+    agent_key_fingerprint: Optional[str] = None
     mcp: McpServerSettings = McpServerSettings()
 
 

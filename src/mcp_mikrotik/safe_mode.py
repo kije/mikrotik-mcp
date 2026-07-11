@@ -65,6 +65,8 @@ class SafeModeManager:
                 password=config.mikrotik_config.password,
                 key_filename=config.mikrotik_config.key_filename,
                 port=config.mikrotik_config.port,
+                allow_agent=config.mikrotik_config.allow_agent,
+                agent_key_fingerprint=config.mikrotik_config.agent_key_fingerprint,
             )
             if not ssh.connect():
                 return "Error: Failed to connect to MikroTik device for safe mode session."
