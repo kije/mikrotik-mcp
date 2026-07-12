@@ -4,6 +4,7 @@ from mcp.server.fastmcp import Context
 
 from ..connector import execute_mikrotik_command
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
+from ..routeros import OutputFormat, print_resource
 
 
 # ---------------------------------------------------------------------------
@@ -55,11 +56,23 @@ async def mikrotik_list_wireguard_interfaces(
     name_filter: Optional[str] = None,
     disabled_only: bool = False,
     running_only: bool = False,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
-    """Lists WireGuard interfaces on the MikroTik device."""
-    await ctx.info("Listing WireGuard interfaces")
+    """Lists WireGuard interfaces on the MikroTik device.
 
-    cmd = "/interface wireguard print"
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"name,listen-port"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wireguard
+    """
+    await ctx.info("Listing WireGuard interfaces")
 
     filters = []
     if name_filter:
@@ -69,29 +82,43 @@ async def mikrotik_list_wireguard_interfaces(
     if running_only:
         filters.append("running=yes")
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "" or result.strip() == "no such item":
-        return "No WireGuard interfaces found."
-
-    return f"WIREGUARD INTERFACES:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/interface wireguard",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="wireguard",
+        empty_message="No WireGuard interfaces found.",
+    )
 
 
 @mcp.tool(name="get_wireguard_interface", annotations=annotate(READ, "Get WireGuard Interface"))
-async def mikrotik_get_wireguard_interface(ctx: Context, name: str) -> str:
-    """Gets detailed information about a specific WireGuard interface."""
+async def mikrotik_get_wireguard_interface(
+    ctx: Context,
+    name: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
+    """Gets detailed information about a specific WireGuard interface.
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wireguard
+    """
     await ctx.info(f"Getting WireGuard interface details: name={name}")
 
-    cmd = f'/interface wireguard print detail where name="{name}"'
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "":
-        return f"WireGuard interface '{name}' not found."
-
-    return f"WIREGUARD INTERFACE DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/interface wireguard",
+        where=[f'name="{name}"'],
+        proplist=proplist,
+        output=output,
+        scope="wireguard",
+        empty_message=f"WireGuard interface '{name}' not found.",
+    )
 
 
 @mcp.tool(name="update_wireguard_interface", annotations=annotate(WRITE_IDEMPOTENT, "Update WireGuard Interface"))
@@ -252,11 +279,23 @@ async def mikrotik_list_wireguard_peers(
     ctx: Context,
     interface_filter: Optional[str] = None,
     disabled_only: bool = False,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
-    """Lists WireGuard peers on the MikroTik device."""
-    await ctx.info("Listing WireGuard peers")
+    """Lists WireGuard peers on the MikroTik device.
 
-    cmd = "/interface wireguard peers print"
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"interface,allowed-address"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wireguard
+    """
+    await ctx.info("Listing WireGuard peers")
 
     filters = []
     if interface_filter:
@@ -264,33 +303,46 @@ async def mikrotik_list_wireguard_peers(
     if disabled_only:
         filters.append("disabled=yes")
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "" or result.strip() == "no such item":
-        return "No WireGuard peers found."
-
-    return f"WIREGUARD PEERS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/interface wireguard peers",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="wireguard",
+        empty_message="No WireGuard peers found.",
+    )
 
 
 @mcp.tool(name="get_wireguard_peer", annotations=annotate(READ, "Get WireGuard Peer"))
-async def mikrotik_get_wireguard_peer(ctx: Context, peer_id: str) -> str:
+async def mikrotik_get_wireguard_peer(
+    ctx: Context,
+    peer_id: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
     """Gets detailed information about a specific WireGuard peer by ID.
 
     Notes:
         peer_id: "*N" or "N" from list output e.g. "*2"
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wireguard
     """
     await ctx.info(f"Getting WireGuard peer details: peer_id={peer_id}")
 
-    cmd = f"/interface wireguard peers print detail where .id={peer_id}"
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "":
-        return f"WireGuard peer with ID '{peer_id}' not found."
-
-    return f"WIREGUARD PEER DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/interface wireguard peers",
+        where=[f".id={peer_id}"],
+        proplist=proplist,
+        output=output,
+        scope="wireguard",
+        empty_message=f"WireGuard peer with ID '{peer_id}' not found.",
+    )
 
 
 @mcp.tool(name="update_wireguard_peer", annotations=annotate(WRITE_IDEMPOTENT, "Update WireGuard Peer"))

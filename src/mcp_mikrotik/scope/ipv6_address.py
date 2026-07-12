@@ -4,6 +4,7 @@ from typing import Optional
 from ..connector import execute_mikrotik_command
 from mcp.server.fastmcp import Context
 from ..app import mcp, READ, WRITE, DESTRUCTIVE, annotate
+from ..routeros import OutputFormat, print_resource
 
 
 def _canonical_ipv6(value: str) -> str:
@@ -91,19 +92,29 @@ async def mikrotik_list_ipv6_addresses(
     dynamic_only: bool = False,
     global_only: bool = False,
     link_local_only: bool = False,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
     """Lists IPv6 addresses on the MikroTik device.
+
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``remove`` calls.
 
     Notes:
         address_filter: partial match on the address, e.g. "2001:db8" or "fe80".
         global_only: show only global (routable) addresses.
         link_local_only: show only link-local (fe80::/10) addresses.
+        proplist: comma-separated fields to return (e.g. "address,interface")
+            so the client fetches only what it needs.
+        output: "json" (default, parsed) | "terse" (raw one-line records) |
+            "detail" (verbose) | "raw" (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ipv6/address
     """
     await ctx.info(
         f"Listing IPv6 addresses with filters: interface={interface_filter}, address={address_filter}"
     )
-
-    cmd = "/ipv6 address print"
 
     filters = []
     if interface_filter:
@@ -119,46 +130,67 @@ async def mikrotik_list_ipv6_addresses(
     if link_local_only:
         filters.append("link-local=yes")
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "":
-        return "No IPv6 addresses found matching the criteria."
-
-    return f"IPV6 ADDRESSES:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/ipv6 address",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="ipv6_address",
+        empty_message="No IPv6 addresses found matching the criteria.",
+    )
 
 
 @mcp.tool(name="get_ipv6_address", annotations=annotate(READ, "Get IPv6 Address"))
-async def mikrotik_get_ipv6_address(ctx: Context, address_id: str) -> str:
+async def mikrotik_get_ipv6_address(
+    ctx: Context,
+    address_id: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
     """Gets detailed information about a specific IPv6 address by ID or address value.
 
     Notes:
         address_id: a RouterOS internal id (e.g. "*1") or the address value
             (e.g. "2001:db8::1/64").
+        output: "detail" (default, verbose text) | "json" (parsed) |
+            "terse" (one-line) | "raw".
+        proplist: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ipv6/address
     """
     await ctx.info(f"Getting IPv6 address details: address_id={address_id}")
 
     # An IPv6 address value always contains ':'; a RouterOS internal id looks
-    # like "*1". Query by the matching attribute first. We validate on the
-    # presence of real entry data ("address=") rather than non-emptiness,
-    # because `print detail` returns the Flags legend (non-empty) even when no
-    # row matches — so an emptiness check would yield a header with no entry.
+    # like "*1". Resolve which selector matches via cheap count-only queries,
+    # trying the matching attribute first.
     addr = _canonical_ipv6(address_id)
     if ":" in address_id:
         queries = [f'address="{addr}"', f'.id="{address_id}"']
     else:
         queries = [f'.id="{address_id}"', f'address="{addr}"']
 
+    selector = None
     for where in queries:
-        result = await execute_mikrotik_command(
-            f"/ipv6 address print detail where {where}", ctx
+        count = await execute_mikrotik_command(
+            f"/ipv6 address print count-only where {where}", ctx
         )
-        if result and "address=" in result:
-            return f"IPV6 ADDRESS DETAILS:\n\n{result}"
+        if count.strip().isdigit() and int(count.strip()) > 0:
+            selector = where
+            break
 
-    return f"IPv6 address '{address_id}' not found."
+    if selector is None:
+        return f"IPv6 address '{address_id}' not found."
+
+    return await print_resource(
+        ctx,
+        "/ipv6 address",
+        where=[selector],
+        proplist=proplist,
+        output=output,
+        scope="ipv6_address",
+        empty_message=f"IPv6 address '{address_id}' not found.",
+    )
 
 
 @mcp.tool(name="remove_ipv6_address", annotations=annotate(DESTRUCTIVE, "Remove IPv6 Address"))

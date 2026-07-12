@@ -4,6 +4,7 @@ from mcp.server.fastmcp import Context
 
 from ..connector import execute_mikrotik_command
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
+from ..routeros import OutputFormat, print_resource
 
 @mcp.tool(name="set_dns_servers", annotations=annotate(WRITE, "Set DNS Servers"))
 async def mikrotik_set_dns_servers(
@@ -147,12 +148,24 @@ async def mikrotik_list_dns_static(
     address_filter: Optional[str] = None,
     type_filter: Optional[str] = None,
     disabled_only: bool = False,
-    regexp_only: bool = False
+    regexp_only: bool = False,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
-    """Lists static DNS entries."""
-    await ctx.info(f"Listing static DNS entries with filters: name={name_filter}")
+    """Lists static DNS entries.
 
-    cmd = "/ip dns static print"
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``update``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"name,address"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/dns
+    """
+    await ctx.info(f"Listing static DNS entries with filters: name={name_filter}")
 
     filters = []
     if name_filter:
@@ -166,28 +179,42 @@ async def mikrotik_list_dns_static(
     if regexp_only:
         filters.append("regexp!=\"\"")
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "" or result.strip() == "no such item":
-        return "No static DNS entries found matching the criteria."
-
-    return f"STATIC DNS ENTRIES:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/ip dns static",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="dns",
+        empty_message="No static DNS entries found matching the criteria.",
+    )
 
 @mcp.tool(name="get_dns_static", annotations=annotate(READ, "Get DNS Static Entry"))
-async def mikrotik_get_dns_static(ctx: Context, entry_id: str) -> str:
-    """Gets details of a specific static DNS entry."""
+async def mikrotik_get_dns_static(
+    ctx: Context,
+    entry_id: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
+    """Gets details of a specific static DNS entry.
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/dns
+    """
     await ctx.info(f"Getting static DNS entry details: entry_id={entry_id}")
 
-    cmd = f"/ip dns static print detail where .id={entry_id}"
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "":
-        return f"Static DNS entry with ID '{entry_id}' not found."
-
-    return f"STATIC DNS ENTRY DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/ip dns static",
+        where=[f".id={entry_id}"],
+        proplist=proplist,
+        output=output,
+        scope="dns",
+        empty_message=f"Static DNS entry with ID '{entry_id}' not found.",
+    )
 
 @mcp.tool(name="update_dns_static", annotations=annotate(WRITE_IDEMPOTENT, "Update DNS Static Entry"))
 async def mikrotik_update_dns_static(

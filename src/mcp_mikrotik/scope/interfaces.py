@@ -2,6 +2,7 @@ from typing import Literal, Optional
 from ..connector import execute_mikrotik_command
 from mcp.server.fastmcp import Context
 from ..app import mcp, READ, WRITE_IDEMPOTENT, annotate
+from ..routeros import OutputFormat, print_resource
 
 
 @mcp.tool(name="list_interfaces", annotations=annotate(READ, "List Interfaces"))
@@ -14,18 +15,27 @@ async def mikrotik_list_interfaces(
     name_filter: Optional[str] = None,
     running_only: bool = False,
     disabled_only: bool = False,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
     """Lists all interfaces on the MikroTik device (ethernet, bridge, WireGuard,
     PPPoE, VLAN, WiFi, SFP, LTE, loopback, and any other type).
+
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    calls.
 
     Notes:
         type_filter: RouterOS interface type e.g. "ether", "bridge", "vlan",
             "wg", "pppoe-out", "wifi", "lte", "loopback"
         name_filter: partial name match e.g. "ether" matches ether1, ether2 …
+        proplist: comma-separated fields to return (e.g. "name,type").
+        output: "json" (default, parsed) | "terse" (raw one-line records) |
+            "detail" (verbose) | "raw" (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/interface
     """
     await ctx.info("Listing all interfaces")
-
-    cmd = "/interface print"
 
     filters = []
     if type_filter:
@@ -37,33 +47,45 @@ async def mikrotik_list_interfaces(
     if disabled_only:
         filters.append("disabled=yes")
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "":
-        return "No interfaces found matching the criteria."
-
-    return f"INTERFACES:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/interface",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="interfaces",
+        empty_message="No interfaces found matching the criteria.",
+    )
 
 
 @mcp.tool(name="get_interface", annotations=annotate(READ, "Get Interface"))
-async def mikrotik_get_interface(ctx: Context, name: str) -> str:
+async def mikrotik_get_interface(
+    ctx: Context,
+    name: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
     """Gets detailed information about a specific interface by name.
 
     Notes:
         name: exact interface name e.g. "ether1", "bridge", "pppoe-out1", "wg0"
+        output: "detail" (default, verbose text) | "json" (parsed) |
+            "terse" (one-line) | "raw".
+        proplist: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/interface
     """
     await ctx.info(f"Getting interface details: name={name}")
 
-    cmd = f'/interface print detail where name="{name}"'
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "":
-        return f"Interface '{name}' not found."
-
-    return f"INTERFACE DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/interface",
+        where=[f'name="{name}"'],
+        proplist=proplist,
+        output=output,
+        scope="interfaces",
+        empty_message=f"Interface '{name}' not found.",
+    )
 
 
 @mcp.tool(name="enable_interface", annotations=annotate(WRITE_IDEMPOTENT, "Enable Interface"))

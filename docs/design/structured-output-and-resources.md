@@ -35,20 +35,36 @@ reuse it.
 
 ## Rollout status
 
-- **Done (this PR):** foundation (`routeros.py` + tests), `docs_refs`, docs +
-  snapshot + logs resources, and a fully converted **`ip_address`** scope as the
-  reference pattern.
-- **Next (per-scope, mechanical):** apply the same two-argument (`proplist`,
-  `output`) conversion to the remaining list/print tools — `ipv6_address`,
-  `interfaces`, `vlan`, `firewall_filter`, `firewall_nat`, `dhcp`, `dns`,
-  `routes`, `ip_pool`, `queue`, `wireless`, `wireguard`, `poe`, `users`, `logs`.
-  Each keeps `output="raw"` available for backward compatibility.
-- **Later:** per-scope config-snapshot resources; experimental log subscription
-  (background poll-and-notify) if the notify-then-refetch UX proves worthwhile.
+- **Done:** foundation (`routeros.py` + tests) and `docs_refs`.
+- **Done:** the `proplist` + `output` conversion is applied across **all**
+  standard list/get tools — `ip_address`, `ipv6_address`, `interfaces`, `vlan`,
+  `firewall_filter`, `firewall_nat`, `dhcp`, `dns`, `routes`, `ip_pool`,
+  `queue`, `wireless`, `wireguard`, `poe`, `users`. Each keeps `output="raw"`
+  for backward compatibility.
+- **Done:** documentation resources (`mikrotik://docs`, `.../docs/{scope}`) and
+  per-object config-snapshot resources (`CONFIG_SNAPSHOTS` in `resources.py`),
+  plus the pollable `mikrotik://logs/recent`.
+- **Deferred (per decision):** experimental push-based log subscription
+  (background poll-and-notify). The pollable logs resource covers most of the
+  value in the meantime.
+- **Intentionally not converted:** aggregate/singleton readouts that are not a
+  simple record list — e.g. `get_dns_settings`, `get_*_statistics`,
+  `get_route_cache`, `get_routing_table`, `get_active_users`,
+  `list_user_ssh_keys`, `get_poe_monitor`, `get_wireless_registration_table`,
+  the `logs` tools (which already have their own `print_as`), and
+  `list_backups` (a file listing). These keep their bespoke output.
 
-## Backward compatibility
+## Backward compatibility & behavior changes
 
-Converted list/get tools now default to JSON instead of wrapped text. The prior
-plain-text behavior remains available via `output="raw"`. Existing tests for
-untouched scopes are unchanged; the `ipv6_address` suite (which asserts exact
-legacy command strings) is intentionally left for the next rollout step.
+Converted list/get tools now default to JSON instead of wrapped text; the prior
+plain-text behavior remains available via `output="raw"`. Two conversions
+dropped small bespoke features that don't fit the shared shape:
+
+- `list_ip_pools` lost its `include_used` flag (per-pool usage counts); that
+  data is available via `list_ip_pool_used`.
+- `list_users`/`get_user` dropped a password-redaction regex — dead code, since
+  `/user print` never emits the password field.
+
+Wireless list/get retain RouterOS **v6/v7 auto-detection** of the wireless menu
+path (`/interface wifi` · `wifiwave2` · `wireless`), and the previously-stubbed
+wireless security-profile / access-list tools now query the device.
