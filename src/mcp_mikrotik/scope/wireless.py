@@ -3,6 +3,7 @@ from typing import List, Literal, Optional, Dict, Any
 from ..connector import execute_mikrotik_command
 from mcp.server.fastmcp import Context
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
+from ..routeros import OutputFormat, print_resource
 
 
 async def mikrotik_detect_wireless_interface_type(ctx: Context) -> Optional[str]:
@@ -141,94 +142,83 @@ async def mikrotik_list_wireless_interfaces(
         ctx: Context,
         name_filter: Optional[str] = None,
         disabled_only: bool = False,
-        running_only: bool = False
+        running_only: bool = False,
+        proplist: Optional[str] = None,
+        output: OutputFormat = "json",
 ) -> str:
-    """Lists wireless interfaces on the MikroTik device."""
+    """Lists wireless interfaces on the MikroTik device.
+
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"name,ssid"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    The wireless menu path is auto-detected across RouterOS versions
+    (``/interface wifi`` and ``wifiwave2`` on v7, ``/interface wireless`` on v6).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi
+    """
     await ctx.info(f"Listing wireless interfaces with filters: name={name_filter}")
 
-    # Try multiple interface types to ensure we find all wireless interfaces
-    interface_types_to_try = [
-        "/interface wifi",
-        "/interface wifiwave2",
-        "/interface wireless",
-        "/interface wlan"
-    ]
-
-    all_results = []
-    working_types = []
-
-    for interface_type in interface_types_to_try:
-        try:
-            # Build the command
-            cmd = f"{interface_type} print"
-
-            # Add filters
-            filters = []
-            if name_filter:
-                filters.append(f'name~"{name_filter}"')
-            if disabled_only:
-                filters.append("disabled=yes")
-            if running_only:
-                filters.append("running=yes")
-
-            if filters:
-                cmd += " where " + " and ".join(filters)
-
-            result = await execute_mikrotik_command(cmd, ctx)
-
-            # Check if command worked and has results
-            if (result and
-                    result.strip() != "" and
-                    "bad command name" not in result.lower() and
-                    "failure:" not in result.lower() and
-                    "no such command prefix" not in result.lower()):
-                working_types.append(interface_type)
-                all_results.append(f"=== {interface_type.upper()} ===\n{result}")
-
-        except Exception as e:
-            await ctx.debug(f"Interface type {interface_type} failed: {e}")
-            continue
-
-    # If we found results, return them
-    if all_results:
-        return f"WIRELESS INTERFACES:\n\n" + "\n\n".join(all_results)
-
-    # If no results found, try to show all interfaces to help debug
-    try:
-        all_interfaces_cmd = "/interface print"
-        all_interfaces = await execute_mikrotik_command(all_interfaces_cmd, ctx)
-        return f"""No wireless interfaces found matching the criteria.
-
-DEBUGGING INFO:
-Working interface types: {', '.join(working_types) if working_types else 'None detected'}
-
-ALL INTERFACES ON DEVICE:
-{all_interfaces}
-
-NOTE: If you see wireless interfaces above, they might be using a different command structure."""
-
-    except Exception:
-        return "No wireless interfaces found matching the criteria."
-
-
-@mcp.tool(name="get_wireless_interface", annotations=annotate(READ, "Get Wireless Interface"))
-async def mikrotik_get_wireless_interface(ctx: Context, name: str) -> str:
-    """Gets detailed information about a specific wireless interface."""
-    await ctx.info(f"Getting wireless interface details: name={name}")
-
-    # Detect wireless interface type
     interface_type = await mikrotik_detect_wireless_interface_type(ctx)
-
     if not interface_type:
         return "Error: No wireless interface support detected on this device."
 
-    cmd = f'{interface_type} print detail where name="{name}"'
-    result = await execute_mikrotik_command(cmd, ctx)
+    filters = []
+    if name_filter:
+        filters.append(f'name~"{name_filter}"')
+    if disabled_only:
+        filters.append("disabled=yes")
+    if running_only:
+        filters.append("running=yes")
 
-    if not result or result.strip() == "":
-        return f"Wireless interface '{name}' not found."
+    return await print_resource(
+        ctx,
+        interface_type,
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="wireless",
+        empty_message="No wireless interfaces found matching the criteria.",
+    )
 
-    return f"WIRELESS INTERFACE DETAILS:\n\n{result}"
+
+@mcp.tool(name="get_wireless_interface", annotations=annotate(READ, "Get Wireless Interface"))
+async def mikrotik_get_wireless_interface(
+    ctx: Context,
+    name: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
+    """Gets detailed information about a specific wireless interface.
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    The wireless menu path is auto-detected across RouterOS v6/v7.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi
+    """
+    await ctx.info(f"Getting wireless interface details: name={name}")
+
+    interface_type = await mikrotik_detect_wireless_interface_type(ctx)
+    if not interface_type:
+        return "Error: No wireless interface support detected on this device."
+
+    return await print_resource(
+        ctx,
+        interface_type,
+        where=[f'name="{name}"'],
+        proplist=proplist,
+        output=output,
+        scope="wireless",
+        empty_message=f"Wireless interface '{name}' not found.",
+    )
 
 
 @mcp.tool(name="remove_wireless_interface", annotations=annotate(DESTRUCTIVE, "Remove Wireless Interface"))
@@ -414,21 +404,64 @@ async def mikrotik_create_wireless_security_profile(ctx: Context, name: str) -> 
 
 
 @mcp.tool(name="list_wireless_security_profiles", annotations=annotate(READ, "List Wireless Security Profiles"))
-async def mikrotik_list_wireless_security_profiles(ctx: Context) -> str:
-    """Legacy function - not supported in RouterOS v7.x"""
-    interface_type = await mikrotik_detect_wireless_interface_type(ctx)
-    if interface_type in ["/interface wifi", "/interface wifiwave2"]:
-        return "Security profiles are not used in RouterOS v7.x. Security is configured directly on wireless interfaces."
-    return "Legacy security profile listing not implemented in this version."
+async def mikrotik_list_wireless_security_profiles(
+    ctx: Context,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
+) -> str:
+    """Lists wireless security profiles on the MikroTik device (RouterOS v6.x
+    legacy wireless system; security profiles are not used on RouterOS v7.x,
+    where security is configured directly on the wireless interface).
+
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi
+    """
+    await ctx.info("Listing wireless security profiles")
+
+    return await print_resource(
+        ctx,
+        "/interface wireless security-profiles",
+        proplist=proplist,
+        output=output,
+        scope="wireless",
+        empty_message="No wireless security profiles found.",
+    )
 
 
 @mcp.tool(name="get_wireless_security_profile", annotations=annotate(READ, "Get Wireless Security Profile"))
-async def mikrotik_get_wireless_security_profile(ctx: Context, name: str) -> str:
-    """Legacy function - not supported in RouterOS v7.x"""
-    interface_type = await mikrotik_detect_wireless_interface_type(ctx)
-    if interface_type in ["/interface wifi", "/interface wifiwave2"]:
-        return "Security profiles are not used in RouterOS v7.x. Check security configuration on wireless interfaces directly."
-    return "Legacy security profile details not implemented in this version."
+async def mikrotik_get_wireless_security_profile(
+    ctx: Context,
+    name: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
+    """Gets detailed information about a specific wireless security profile
+    (RouterOS v6.x legacy wireless system).
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi
+    """
+    await ctx.info(f"Getting wireless security profile details: name={name}")
+
+    return await print_resource(
+        ctx,
+        "/interface wireless security-profiles",
+        where=[f'name="{name}"'],
+        proplist=proplist,
+        output=output,
+        scope="wireless",
+        empty_message=f"Wireless security profile '{name}' not found.",
+    )
 
 
 @mcp.tool(name="remove_wireless_security_profile", annotations=annotate(DESTRUCTIVE, "Remove Wireless Security Profile"))
@@ -459,12 +492,35 @@ async def mikrotik_create_wireless_access_list(ctx: Context) -> str:
 
 
 @mcp.tool(name="list_wireless_access_list", annotations=annotate(READ, "List Wireless Access List"))
-async def mikrotik_list_wireless_access_list(ctx: Context) -> str:
-    """Legacy function - different in RouterOS v7.x"""
-    interface_type = await mikrotik_detect_wireless_interface_type(ctx)
-    if interface_type in ["/interface wifi", "/interface wifiwave2"]:
-        return "Access lists are configured differently in RouterOS v7.x. Check firewall rules or other access control configurations."
-    return "Legacy access list listing not implemented in this version."
+async def mikrotik_list_wireless_access_list(
+    ctx: Context,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
+) -> str:
+    """Lists wireless access list entries on the MikroTik device (RouterOS v6.x
+    legacy wireless system; RouterOS v7.x uses firewall rules or other access
+    control methods instead).
+
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi
+    """
+    await ctx.info("Listing wireless access list entries")
+
+    return await print_resource(
+        ctx,
+        "/interface wireless access-list",
+        proplist=proplist,
+        output=output,
+        scope="wireless",
+        empty_message="No wireless access list entries found.",
+    )
 
 
 @mcp.tool(name="remove_wireless_access_list_entry", annotations=annotate(DESTRUCTIVE, "Remove Wireless Access List Entry"))

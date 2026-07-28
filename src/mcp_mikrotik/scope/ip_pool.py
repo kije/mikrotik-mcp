@@ -4,6 +4,7 @@ from mcp.server.fastmcp import Context
 
 from ..connector import execute_mikrotik_command
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
+from ..routeros import OutputFormat, print_resource
 
 @mcp.tool(name="create_ip_pool", annotations=annotate(WRITE, "Add IP Pool"))
 async def mikrotik_create_ip_pool(
@@ -63,75 +64,71 @@ async def mikrotik_list_ip_pools(
     ctx: Context,
     name_filter: Optional[str] = None,
     ranges_filter: Optional[str] = None,
-    include_used: bool = False
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
-    """Lists IP pools on the MikroTik device."""
+    """Lists IP pools on the MikroTik device.
+
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"name,ranges"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Note: per-pool used-address counts are available via ``list_ip_pool_used``
+    or ``get_ip_pool``.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/pool
+    """
     await ctx.info(f"Listing IP pools with filters: name={name_filter}, ranges={ranges_filter}")
 
-    # Build the command
-    cmd = "/ip pool print"
-
-    if include_used:
-        cmd += " detail"
-
-    # Add filters
     filters = []
     if name_filter:
         filters.append(f'name~"{name_filter}"')
     if ranges_filter:
         filters.append(f'ranges~"{ranges_filter}"')
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    # Check for empty result
-    if not result or result.strip() == "" or result.strip() == "no such item":
-        return "No IP pools found matching the criteria."
-
-    if include_used:
-        # Parse and add used information
-        result_lines = result.strip().split('\n')
-        output_lines = []
-
-        for line in result_lines:
-            output_lines.append(line)
-            if "name=" in line:
-                # Extract pool name from the line
-                name_start = line.find('name="') + 6
-                name_end = line.find('"', name_start)
-                if name_start > 5 and name_end > name_start:
-                    pool_name = line[name_start:name_end]
-                    # Get used addresses for this pool
-                    used_cmd = f'/ip pool used print count-only where pool="{pool_name}"'
-                    used_count = await execute_mikrotik_command(used_cmd, ctx)
-                    if used_count.strip().isdigit():
-                        output_lines.append(f"      used-addresses={used_count.strip()}")
-
-        return f"IP POOLS:\n\n" + "\n".join(output_lines)
-
-    return f"IP POOLS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/ip pool",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="ip_pool",
+        empty_message="No IP pools found matching the criteria.",
+    )
 
 @mcp.tool(name="get_ip_pool", annotations=annotate(READ, "Get IP Pool"))
-async def mikrotik_get_ip_pool(ctx: Context, name: str) -> str:
-    """Gets detailed information about a specific IP pool including used address count."""
+async def mikrotik_get_ip_pool(
+    ctx: Context,
+    name: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
+    """Gets detailed information about a specific IP pool by name.
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    Note: per-pool used-address counts are available via ``list_ip_pool_used``.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/pool
+    """
     await ctx.info(f"Getting IP pool details: name={name}")
 
-    cmd = f'/ip pool print detail where name="{name}"'
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "":
-        return f"IP pool '{name}' not found."
-
-    # Get used addresses count
-    used_cmd = f'/ip pool used print count-only where pool="{name}"'
-    used_count = await execute_mikrotik_command(used_cmd, ctx)
-
-    if used_count.strip().isdigit():
-        return f"IP POOL DETAILS:\n\n{result}\n      used-addresses={used_count.strip()}"
-
-    return f"IP POOL DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/ip pool",
+        where=[f'name="{name}"'],
+        proplist=proplist,
+        output=output,
+        scope="ip_pool",
+        empty_message=f"IP pool '{name}' not found.",
+    )
 
 @mcp.tool(name="update_ip_pool", annotations=annotate(WRITE_IDEMPOTENT, "Update IP Pool"))
 async def mikrotik_update_ip_pool(
@@ -227,14 +224,25 @@ async def mikrotik_list_ip_pool_used(
     pool_name: Optional[str] = None,
     address_filter: Optional[str] = None,
     mac_filter: Optional[str] = None,
-    info_filter: Optional[str] = None
+    info_filter: Optional[str] = None,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
-    """Lists currently used (allocated) addresses from IP pools."""
+    """Lists currently used (allocated) addresses from IP pools.
+
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"address,pool"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/pool
+    """
     await ctx.info(f"Listing used IP pool addresses: pool={pool_name}, address={address_filter}")
 
-    cmd = "/ip pool used print"
-
-    # Add filters
     filters = []
     if pool_name:
         filters.append(f'pool="{pool_name}"')
@@ -245,15 +253,15 @@ async def mikrotik_list_ip_pool_used(
     if info_filter:
         filters.append(f'info~"{info_filter}"')
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "" or result.strip() == "no such item":
-        return "No used addresses found matching the criteria."
-
-    return f"USED IP POOL ADDRESSES:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/ip pool used",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="ip_pool",
+        empty_message="No used addresses found matching the criteria.",
+    )
 
 @mcp.tool(name="expand_ip_pool", annotations=annotate(WRITE_IDEMPOTENT, "Expand IP Pool"))
 async def mikrotik_expand_ip_pool(ctx: Context, name: str, additional_ranges: str) -> str:

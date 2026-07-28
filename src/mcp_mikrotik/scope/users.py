@@ -3,6 +3,7 @@ from ..connector import execute_mikrotik_command
 from mcp.server.fastmcp import Context
 import re
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
+from ..routeros import OutputFormat, print_resource
 
 @mcp.tool(name="add_user", annotations=annotate(WRITE, "Add User"))
 async def mikrotik_add_user(
@@ -60,12 +61,24 @@ async def mikrotik_list_users(
     name_filter: Optional[str] = None,
     group_filter: Optional[str] = None,
     disabled_only: bool = False,
-    active_only: bool = False
+    active_only: bool = False,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
-    """Lists users on MikroTik device."""
-    await ctx.info(f"Listing users with filters: name={name_filter}, group={group_filter}")
+    """Lists users on MikroTik device.
 
-    cmd = "/user print"
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"name,group"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/user
+    """
+    await ctx.info(f"Listing users with filters: name={name_filter}, group={group_filter}")
 
     filters = []
     if name_filter:
@@ -75,34 +88,42 @@ async def mikrotik_list_users(
     if disabled_only:
         filters.append("disabled=yes")
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "" or result.strip() == "no such item":
-        return "No users found matching the criteria."
-
-    # Remove passwords from output
-    result = re.sub(r'password="[^"]*"', 'password="***"', result)
-
-    return f"USERS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/user",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="users",
+        empty_message="No users found matching the criteria.",
+    )
 
 @mcp.tool(name="get_user", annotations=annotate(READ, "Get User"))
-async def mikrotik_get_user(ctx: Context, name: str) -> str:
-    """Gets detailed information about a specific user."""
+async def mikrotik_get_user(
+    ctx: Context,
+    name: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
+    """Gets detailed information about a specific user.
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/user
+    """
     await ctx.info(f"Getting user details: name={name}")
 
-    cmd = f'/user print detail where name="{name}"'
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "":
-        return f"User '{name}' not found."
-
-    # Remove password from output
-    result = re.sub(r'password="[^"]*"', 'password="***"', result)
-
-    return f"USER DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/user",
+        where=[f'name="{name}"'],
+        proplist=proplist,
+        output=output,
+        scope="users",
+        empty_message=f"User '{name}' not found.",
+    )
 
 @mcp.tool(name="update_user", annotations=annotate(WRITE_IDEMPOTENT, "Update User"))
 async def mikrotik_update_user(
@@ -247,12 +268,24 @@ async def mikrotik_add_user_group(
 async def mikrotik_list_user_groups(
     ctx: Context,
     name_filter: Optional[str] = None,
-    policy_filter: Optional[str] = None
+    policy_filter: Optional[str] = None,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
-    """Lists user groups on MikroTik device."""
-    await ctx.info(f"Listing user groups with filters: name={name_filter}")
+    """Lists user groups on MikroTik device.
 
-    cmd = "/user group print"
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"name,policy"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/user
+    """
+    await ctx.info(f"Listing user groups with filters: name={name_filter}")
 
     filters = []
     if name_filter:
@@ -260,28 +293,42 @@ async def mikrotik_list_user_groups(
     if policy_filter:
         filters.append(f'policy~"{policy_filter}"')
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "" or result.strip() == "no such item":
-        return "No user groups found matching the criteria."
-
-    return f"USER GROUPS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/user group",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="users",
+        empty_message="No user groups found matching the criteria.",
+    )
 
 @mcp.tool(name="get_user_group", annotations=annotate(READ, "Get User Group"))
-async def mikrotik_get_user_group(ctx: Context, name: str) -> str:
-    """Gets detailed information about a specific user group."""
+async def mikrotik_get_user_group(
+    ctx: Context,
+    name: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
+    """Gets detailed information about a specific user group.
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/user
+    """
     await ctx.info(f"Getting user group details: name={name}")
 
-    cmd = f'/user group print detail where name="{name}"'
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "":
-        return f"User group '{name}' not found."
-
-    return f"USER GROUP DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/user group",
+        where=[f'name="{name}"'],
+        proplist=proplist,
+        output=output,
+        scope="users",
+        empty_message=f"User group '{name}' not found.",
+    )
 
 @mcp.tool(name="update_user_group", annotations=annotate(WRITE_IDEMPOTENT, "Update User Group"))
 async def mikrotik_update_user_group(

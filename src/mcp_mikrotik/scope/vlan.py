@@ -3,6 +3,7 @@ from pydantic import Field
 from ..connector import execute_mikrotik_command
 from mcp.server.fastmcp import Context
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
+from ..routeros import OutputFormat, print_resource
 
 @mcp.tool(name="create_vlan_interface", annotations=annotate(WRITE, "Create VLAN"))
 async def mikrotik_create_vlan_interface(
@@ -75,15 +76,24 @@ async def mikrotik_list_vlan_interfaces(
     name_filter: Optional[str] = None,
     vlan_id_filter: Optional[int] = None,
     interface_filter: Optional[str] = None,
-    disabled_only: bool = False
+    disabled_only: bool = False,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
-    """Lists VLAN interfaces on the MikroTik device."""
+    """Lists VLAN interfaces on the MikroTik device.
+
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. "name,vlan-id").
+    - ``output``: "json" (default, parsed) | "terse" (raw one-line records) |
+      "detail" (verbose) | "raw" (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/vlan
+    """
     await ctx.info(f"Listing VLAN interfaces with filters: name={name_filter}, vlan_id={vlan_id_filter}, interface={interface_filter}")
 
-    # Build the command
-    cmd = "/interface vlan print"
-
-    # Add filters
     filters = []
     if name_filter:
         filters.append(f'name~"{name_filter}"')
@@ -94,29 +104,42 @@ async def mikrotik_list_vlan_interfaces(
     if disabled_only:
         filters.append("disabled=yes")
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    # Check for empty result
-    if not result or result.strip() == "" or result.strip() == "no such item":
-        return "No VLAN interfaces found matching the criteria."
-
-    return f"VLAN INTERFACES:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/interface vlan",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="vlan",
+        empty_message="No VLAN interfaces found matching the criteria.",
+    )
 
 @mcp.tool(name="get_vlan_interface", annotations=annotate(READ, "Get VLAN"))
-async def mikrotik_get_vlan_interface(ctx: Context, name: str) -> str:
-    """Gets detailed information about a specific VLAN interface."""
+async def mikrotik_get_vlan_interface(
+    ctx: Context,
+    name: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
+    """Gets detailed information about a specific VLAN interface.
+
+    - ``output``: "detail" (default, verbose text) | "json" (parsed) |
+      "terse" (one-line) | "raw".
+    - ``proplist``: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/vlan
+    """
     await ctx.info(f"Getting VLAN interface details: name={name}")
 
-    cmd = f'/interface vlan print detail where name="{name}"'
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "":
-        return f"VLAN interface '{name}' not found."
-
-    return f"VLAN INTERFACE DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/interface vlan",
+        where=[f'name="{name}"'],
+        proplist=proplist,
+        output=output,
+        scope="vlan",
+        empty_message=f"VLAN interface '{name}' not found.",
+    )
 
 @mcp.tool(name="update_vlan_interface", annotations=annotate(WRITE_IDEMPOTENT, "Update VLAN"))
 async def mikrotik_update_vlan_interface(

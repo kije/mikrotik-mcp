@@ -2,6 +2,7 @@ from typing import Literal, Optional
 from mcp.server.fastmcp import Context
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
 from ..connector import execute_mikrotik_command
+from ..routeros import OutputFormat, print_resource
 
 
 # ───────────────────────────────────────────────
@@ -141,36 +142,67 @@ async def mikrotik_list_queue_types(
     ctx: Context,
     name_filter: Optional[str] = None,
     kind_filter: Optional[str] = None,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
-    """Lists queue types on the MikroTik device."""
+    """Lists queue types on the MikroTik device.
+
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"name,kind"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple
+    """
     await ctx.info("Listing queue types")
 
-    cmd = "/queue type print"
     filters = []
     if name_filter:
         filters.append(f'name~"{name_filter}"')
     if kind_filter:
         filters.append(f"kind={kind_filter}")
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-    if not result or result.strip() == "":
-        return "No queue types found matching the criteria."
-    return f"QUEUE TYPES:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/queue type",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="queue",
+        empty_message="No queue types found matching the criteria.",
+    )
 
 
 @mcp.tool(name="get_queue_type", annotations=annotate(READ, "Get Queue Type"))
-async def mikrotik_get_queue_type(ctx: Context, name: str) -> str:
-    """Gets detailed information about a specific queue type."""
+async def mikrotik_get_queue_type(
+    ctx: Context,
+    name: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
+    """Gets detailed information about a specific queue type.
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple
+    """
     await ctx.info(f"Getting queue type details: name={name}")
 
-    cmd = f'/queue type print detail where name="{name}"'
-    result = await execute_mikrotik_command(cmd, ctx)
-    if not result or result.strip() == "":
-        return f"Queue type '{name}' not found."
-    return f"QUEUE TYPE DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/queue type",
+        where=[f'name="{name}"'],
+        proplist=proplist,
+        output=output,
+        scope="queue",
+        empty_message=f"Queue type '{name}' not found.",
+    )
 
 
 @mcp.tool(name="update_queue_type", annotations=annotate(WRITE_IDEMPOTENT, "Update Queue Type"))
@@ -335,11 +367,24 @@ async def mikrotik_list_queue_trees(
     parent_filter: Optional[str] = None,
     disabled_only: bool = False,
     invalid_only: bool = False,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
-    """Lists queue trees on the MikroTik device."""
+    """Lists queue trees on the MikroTik device.
+
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"name,parent"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple
+    """
     await ctx.info("Listing queue trees")
 
-    cmd = "/queue tree print"
     filters = []
     if name_filter:
         filters.append(f'name~"{name_filter}"')
@@ -350,25 +395,43 @@ async def mikrotik_list_queue_trees(
     if invalid_only:
         filters.append("invalid=yes")
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-    if not result or result.strip() == "":
-        return "No queue trees found matching the criteria."
-    return f"QUEUE TREES:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/queue tree",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="queue",
+        empty_message="No queue trees found matching the criteria.",
+    )
 
 
 @mcp.tool(name="get_queue_tree", annotations=annotate(READ, "Get Queue Tree"))
-async def mikrotik_get_queue_tree(ctx: Context, name: str) -> str:
-    """Gets detailed information about a specific queue tree."""
+async def mikrotik_get_queue_tree(
+    ctx: Context,
+    name: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
+    """Gets detailed information about a specific queue tree.
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple
+    """
     await ctx.info(f"Getting queue tree details: name={name}")
 
-    cmd = f'/queue tree print detail where name="{name}"'
-    result = await execute_mikrotik_command(cmd, ctx)
-    if not result or result.strip() == "":
-        return f"Queue tree '{name}' not found."
-    return f"QUEUE TREE DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/queue tree",
+        where=[f'name="{name}"'],
+        proplist=proplist,
+        output=output,
+        scope="queue",
+        empty_message=f"Queue tree '{name}' not found.",
+    )
 
 
 @mcp.tool(name="update_queue_tree", annotations=annotate(WRITE_IDEMPOTENT, "Update Queue Tree"))
@@ -578,11 +641,24 @@ async def mikrotik_list_simple_queues(
     target_filter: Optional[str] = None,
     disabled_only: bool = False,
     invalid_only: bool = False,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
-    """Lists simple queues on the MikroTik device."""
+    """Lists simple queues on the MikroTik device.
+
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"name,target"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple
+    """
     await ctx.info("Listing simple queues")
 
-    cmd = "/queue simple print"
     filters = []
     if name_filter:
         filters.append(f'name~"{name_filter}"')
@@ -593,25 +669,43 @@ async def mikrotik_list_simple_queues(
     if invalid_only:
         filters.append("invalid=yes")
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-    if not result or result.strip() == "":
-        return "No simple queues found matching the criteria."
-    return f"SIMPLE QUEUES:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/queue simple",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="queue",
+        empty_message="No simple queues found matching the criteria.",
+    )
 
 
 @mcp.tool(name="get_simple_queue", annotations=annotate(READ, "Get Simple Queue"))
-async def mikrotik_get_simple_queue(ctx: Context, name: str) -> str:
-    """Gets detailed information about a specific simple queue."""
+async def mikrotik_get_simple_queue(
+    ctx: Context,
+    name: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
+    """Gets detailed information about a specific simple queue.
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple
+    """
     await ctx.info(f"Getting simple queue details: name={name}")
 
-    cmd = f'/queue simple print detail where name="{name}"'
-    result = await execute_mikrotik_command(cmd, ctx)
-    if not result or result.strip() == "":
-        return f"Simple queue '{name}' not found."
-    return f"SIMPLE QUEUE DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/queue simple",
+        where=[f'name="{name}"'],
+        proplist=proplist,
+        output=output,
+        scope="queue",
+        empty_message=f"Simple queue '{name}' not found.",
+    )
 
 
 @mcp.tool(name="update_simple_queue", annotations=annotate(WRITE_IDEMPOTENT, "Update Simple Queue"))

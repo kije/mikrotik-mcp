@@ -2,6 +2,7 @@ from typing import Literal, Optional, List
 from mcp.server.fastmcp import Context
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, DANGEROUS, annotate
 from ..connector import execute_mikrotik_command
+from ..routeros import OutputFormat, print_resource
 
 @mcp.tool(name="create_filter_rule", annotations=annotate(WRITE, "Create Firewall Filter Rule"))
 async def mikrotik_create_filter_rule(
@@ -136,13 +137,24 @@ async def mikrotik_list_filter_rules(
     interface_filter: Optional[str] = None,
     disabled_only: bool = False,
     invalid_only: bool = False,
-    dynamic_only: bool = False
+    dynamic_only: bool = False,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
 ) -> str:
-    """Lists firewall filter rules on the MikroTik device."""
-    await ctx.info(f"Listing firewall filter rules with filters: chain={chain_filter}, action={action_filter}")
+    """Lists firewall filter rules on the MikroTik device.
 
-    # Build the command
-    cmd = "/ip firewall filter print"
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``move``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"chain,action"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/firewall/filter
+    """
+    await ctx.info(f"Listing firewall filter rules with filters: chain={chain_filter}, action={action_filter}")
 
     # Add filters
     filters = []
@@ -165,33 +177,51 @@ async def mikrotik_list_filter_rules(
     if dynamic_only:
         filters.append("dynamic=yes")
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    # Check for empty result
-    if not result or result.strip() == "" or result.strip() == "no such item":
-        return "No firewall filter rules found matching the criteria."
-
-    return f"FIREWALL FILTER RULES:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/ip firewall filter",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="firewall_filter",
+        empty_message="No firewall filter rules found matching the criteria.",
+    )
 
 @mcp.tool(name="get_filter_rule", annotations=annotate(READ, "Get Firewall Filter Rule"))
-async def mikrotik_get_filter_rule(ctx: Context, rule_id: str) -> str:
+async def mikrotik_get_filter_rule(
+    ctx: Context,
+    rule_id: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+) -> str:
     """Gets detailed information about a specific firewall filter rule.
 
     Notes:
         rule_id: use the ID from list output e.g. "*1" or "0"
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/firewall/filter
     """
     await ctx.info(f"Getting firewall filter rule details: rule_id={rule_id}")
 
-    cmd = f"/ip firewall filter print detail where .id={rule_id}"
-    result = await execute_mikrotik_command(cmd, ctx)
-
-    if not result or result.strip() == "":
+    count = await execute_mikrotik_command(
+        f'/ip firewall filter print count-only where .id={rule_id}', ctx
+    )
+    if not (count.strip().isdigit() and int(count.strip()) > 0):
         return f"Firewall filter rule with ID '{rule_id}' not found."
 
-    return f"FIREWALL FILTER RULE DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/ip firewall filter",
+        where=[f".id={rule_id}"],
+        proplist=proplist,
+        output=output,
+        scope="firewall_filter",
+        empty_message=f"Firewall filter rule with ID '{rule_id}' not found.",
+    )
 
 @mcp.tool(name="update_filter_rule", annotations=annotate(WRITE_IDEMPOTENT, "Update Firewall Filter Rule"))
 async def mikrotik_update_filter_rule(

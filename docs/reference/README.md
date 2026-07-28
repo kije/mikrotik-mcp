@@ -2,6 +2,25 @@
 
 Complete reference documentation for all MikroTik MCP tools.
 
+## Structured output (list/get tools)
+
+Tools that list a configuration object or fetch one by id/name share two
+options:
+
+- **`output`** — `json` (default; parsed `{count, records, documentation}`
+  where each record carries its stable `.id` via `show-ids`, plus `_index` and
+  decoded `_flags`), `terse` (raw one-line records), `detail` (verbose text), or
+  `raw` (legacy plain `print` text for backward compatibility).
+- **`proplist`** — comma-separated field names (e.g. `"address,interface"`) so
+  the client fetches only the fields it needs.
+
+Each response includes a `documentation` link to the relevant
+[RouterOS manual](https://manual.mikrotik.com/docs/introduction/) page. The same
+references and live config snapshots are also exposed as **MCP resources**
+(`mikrotik://docs`, `mikrotik://docs/{scope}`, `mikrotik://<object>`, and the
+pollable `mikrotik://logs/recent`). See
+[design/structured-output-and-resources.md](../design/structured-output-and-resources.md).
+
 ## Available Tool Categories
 
 - **[Interfaces](interfaces/README.md)** - All Interface Management (ethernet, bridge, PPPoE, SFP, LTE …)

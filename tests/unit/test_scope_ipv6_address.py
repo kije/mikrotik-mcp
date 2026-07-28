@@ -1,6 +1,7 @@
 """Unit tests for the IPv6 address scope (issue #92)."""
 
 import asyncio
+import json
 
 from tests.conftest import FakeExecutor
 
@@ -71,26 +72,31 @@ def test_add_no_broadcast_field(ctx, monkeypatch):
 
 def test_list_no_filters(ctx, monkeypatch):
     from mcp_mikrotik.scope import ipv6_address as m
+    from mcp_mikrotik import routeros
 
     fake = FakeExecutor()
     monkeypatch.setattr(m, "execute_mikrotik_command", fake, raising=True)
+    # print_resource imports the executor from routeros, patch there too.
+    monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
 
     _run(m.mikrotik_list_ipv6_addresses(ctx))
-    assert fake.commands[0] == "/ipv6 address print"
+    assert fake.commands[0] == "/ipv6 address print terse show-ids without-paging"
 
 
 def test_list_with_filters(ctx, monkeypatch):
     from mcp_mikrotik.scope import ipv6_address as m
+    from mcp_mikrotik import routeros
 
     fake = FakeExecutor()
     monkeypatch.setattr(m, "execute_mikrotik_command", fake, raising=True)
+    monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
 
     _run(m.mikrotik_list_ipv6_addresses(
         ctx, interface_filter="ether1", address_filter="2001:db8",
         global_only=True, link_local_only=False, dynamic_only=True, disabled_only=True,
     ))
     cmd = fake.commands[0]
-    assert cmd.startswith("/ipv6 address print where ")
+    assert cmd.startswith("/ipv6 address print terse show-ids without-paging where ")
     assert 'interface="ether1"' in cmd
     assert 'address~"2001:db8"' in cmd
     assert "global=yes" in cmd
@@ -100,22 +106,45 @@ def test_list_with_filters(ctx, monkeypatch):
 
 def test_list_link_local_filter(ctx, monkeypatch):
     from mcp_mikrotik.scope import ipv6_address as m
+    from mcp_mikrotik import routeros
 
     fake = FakeExecutor()
     monkeypatch.setattr(m, "execute_mikrotik_command", fake, raising=True)
+    monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
 
     _run(m.mikrotik_list_ipv6_addresses(ctx, link_local_only=True))
-    assert fake.commands[0] == "/ipv6 address print where link-local=yes"
+    assert fake.commands[0] == (
+        "/ipv6 address print terse show-ids without-paging where link-local=yes"
+    )
 
 
 def test_list_empty_message(ctx, monkeypatch):
     from mcp_mikrotik.scope import ipv6_address as m
+    from mcp_mikrotik import routeros
 
     async def fake(cmd, _ctx):
         return ""
 
     monkeypatch.setattr(m, "execute_mikrotik_command", fake, raising=True)
+    monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
     out = _run(m.mikrotik_list_ipv6_addresses(ctx))
+    # Default output is JSON: an empty record set, not the legacy text message.
+    payload = json.loads(out)
+    assert payload["count"] == 0
+    assert payload["records"] == []
+
+
+def test_list_raw_empty_message(ctx, monkeypatch):
+    """The legacy plain-text "not found" message is preserved for output="raw"."""
+    from mcp_mikrotik.scope import ipv6_address as m
+    from mcp_mikrotik import routeros
+
+    async def fake(cmd, _ctx):
+        return ""
+
+    monkeypatch.setattr(m, "execute_mikrotik_command", fake, raising=True)
+    monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
+    out = _run(m.mikrotik_list_ipv6_addresses(ctx, output="raw"))
     assert "No IPv6 addresses found" in out
 
 
@@ -126,44 +155,58 @@ def test_list_empty_message(ctx, monkeypatch):
 def test_get_by_id_queries_id_first(ctx, monkeypatch):
     """A non-colon value (a RouterOS id) is queried by .id first."""
     from mcp_mikrotik.scope import ipv6_address as m
+    from mcp_mikrotik import routeros
 
     calls = []
 
     async def fake(cmd, _ctx):
         calls.append(cmd)
+        if "count-only" in cmd:
+            return "1"
         return "address=2001:db8::1/64 interface=ether1"  # real entry data
 
     monkeypatch.setattr(m, "execute_mikrotik_command", fake, raising=True)
+    # print_resource imports the executor from routeros, patch there too.
+    monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
     out = _run(m.mikrotik_get_ipv6_address(ctx, address_id="*1"))
-    assert calls[0] == '/ipv6 address print detail where .id="*1"'
-    assert "IPV6 ADDRESS DETAILS" in out
+    assert calls[0] == '/ipv6 address print count-only where .id="*1"'
+    assert '/ipv6 address print detail show-ids where .id="*1"' in calls
+    assert "address=2001:db8::1/64" in out
 
 
 def test_get_by_address_queries_address_first(ctx, monkeypatch):
     """A value containing ':' (an IPv6 address) is queried by address first."""
     from mcp_mikrotik.scope import ipv6_address as m
+    from mcp_mikrotik import routeros
 
     calls = []
 
     async def fake(cmd, _ctx):
         calls.append(cmd)
+        if "count-only" in cmd:
+            return "1"
         return "address=2001:db8::1/64 interface=ether1"
 
     monkeypatch.setattr(m, "execute_mikrotik_command", fake, raising=True)
+    monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
     out = _run(m.mikrotik_get_ipv6_address(ctx, address_id="2001:db8::1/64"))
-    assert calls[0] == '/ipv6 address print detail where address="2001:db8::1/64"'
-    assert "IPV6 ADDRESS DETAILS" in out
+    assert calls[0] == '/ipv6 address print count-only where address="2001:db8::1/64"'
+    assert '/ipv6 address print detail show-ids where address="2001:db8::1/64"' in calls
+    assert "address=2001:db8::1/64" in out
 
 
 def test_get_legend_only_is_treated_as_not_found(ctx, monkeypatch):
-    """Regression (caught live): `print detail` returns the Flags legend even
-    when nothing matches — that must NOT be reported as a found entry."""
+    """Regression (caught live): the old `print detail` implementation
+    returned the Flags legend even when nothing matches, which was wrongly
+    reported as a found entry. The current implementation resolves the
+    selector via a count-only query first, so a non-numeric (legend) response
+    to that count-only query must also be treated as "no match"."""
     from mcp_mikrotik.scope import ipv6_address as m
 
     legend = "Flags: X - disabled, I - invalid; D - dynamic; G - global, L - link-local"
 
     async def fake(cmd, _ctx):
-        return legend  # non-empty, but no real "address=" row
+        return legend  # non-empty, non-numeric — never a valid count-only reply
 
     monkeypatch.setattr(m, "execute_mikrotik_command", fake, raising=True)
     out = _run(m.mikrotik_get_ipv6_address(ctx, address_id="2001:db8::1/64"))
@@ -207,17 +250,21 @@ def test_remove_not_found(ctx, monkeypatch):
 
 def test_get_canonicalizes_noncanonical_address(ctx, monkeypatch):
     from mcp_mikrotik.scope import ipv6_address as m
+    from mcp_mikrotik import routeros
 
     calls = []
 
     async def fake(cmd, _ctx):
         calls.append(cmd)
+        if "count-only" in cmd:
+            return "1"
         return "address=2001:db8::1/64 interface=ether1"
 
     monkeypatch.setattr(m, "execute_mikrotik_command", fake, raising=True)
+    monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
     # Uppercase + expanded zeros -> must be normalized to 2001:db8::1/64
     _run(m.mikrotik_get_ipv6_address(ctx, address_id="2001:DB8:0:0::1/64"))
-    assert calls[0] == '/ipv6 address print detail where address="2001:db8::1/64"'
+    assert calls[0] == '/ipv6 address print count-only where address="2001:db8::1/64"'
 
 
 def test_remove_by_address_path_canonicalized(ctx, monkeypatch):
