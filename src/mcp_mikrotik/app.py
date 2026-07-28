@@ -60,3 +60,6 @@ from mcp_mikrotik.scope import (  # noqa: F401, E402
     backup, dhcp, dns, firewall_address_list, firewall_filter, firewall_nat,
     interfaces, inventory, ip_address, ipv6_address, ipv6_firewall_filter, ip_pool, logs, poe, queue, safe_mode, routes, users, vlan, wireless, wireguard,
 )
+
+# Import resource definitions to trigger @mcp.resource() registration.
+from mcp_mikrotik import resources  # noqa: F401, E402

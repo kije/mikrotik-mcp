@@ -48,22 +48,30 @@ def test_get_poe_monitor_handles_empty(ctx, monkeypatch):
 
 def test_list_poe_command_and_filter(ctx, monkeypatch):
     from mcp_mikrotik.scope import poe
+    from mcp_mikrotik import routeros
 
     fake = FakeExecutor()
     monkeypatch.setattr(poe, "execute_mikrotik_command", fake, raising=True)
+    # print_resource imports the executor from routeros, patch there too.
+    monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
 
     _run(poe.mikrotik_list_poe(ctx))
-    assert fake.commands[-1] == "/interface ethernet poe print"
+    assert fake.commands[-1] == "/interface ethernet poe print terse show-ids without-paging"
 
     _run(poe.mikrotik_list_poe(ctx, interface_filter="ether"))
-    assert fake.commands[-1] == '/interface ethernet poe print where name~"ether"'
+    assert fake.commands[-1] == (
+        '/interface ethernet poe print terse show-ids without-paging where name~"ether"'
+    )
 
 
 def test_get_poe_settings_command(ctx, monkeypatch):
     from mcp_mikrotik.scope import poe
+    from mcp_mikrotik import routeros
 
     fake = FakeExecutor()
     monkeypatch.setattr(poe, "execute_mikrotik_command", fake, raising=True)
+    # print_resource imports the executor from routeros, patch there too.
+    monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
 
     _run(poe.mikrotik_get_poe_settings(ctx, name="ether1"))
-    assert fake.commands[-1] == '/interface ethernet poe print detail where name="ether1"'
+    assert fake.commands[-1] == '/interface ethernet poe print detail show-ids where name="ether1"'

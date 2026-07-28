@@ -4,6 +4,7 @@ from mcp.server.mcpserver import Context
 
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
 from ..connector import execute_mikrotik_command
+from ..routeros import OutputFormat, print_resource
 
 
 @mcp.tool(name="create_dhcp_server", annotations=annotate(WRITE, "Create DHCP Server"))
@@ -63,15 +64,25 @@ async def mikrotik_list_dhcp_servers(
     interface_filter: Optional[str] = None,
     disabled_only: bool = False,
     invalid_only: bool = False,
-    device: Optional[str] = None
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
+    device: Optional[str] = None,
 ) -> str:
-    """Lists DHCP servers on the MikroTik device."""
+    """Lists DHCP servers on the MikroTik device.
+
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"name,interface"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/dhcp-server
+    """
     await ctx.info(f"Listing DHCP servers with filters: name={name_filter}, interface={interface_filter}")
 
-    # Build the command
-    cmd = "/ip dhcp-server print"
-
-    # Add filters
     filters = []
     if name_filter:
         filters.append(f'name~"{name_filter}"')
@@ -82,28 +93,45 @@ async def mikrotik_list_dhcp_servers(
     if invalid_only:
         filters.append("invalid=yes")
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx, device=device)
-
-    if not result or result.strip() == "":
-        return "No DHCP servers found matching the criteria."
-
-    return f"DHCP SERVERS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/ip dhcp-server",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="dhcp",
+        empty_message="No DHCP servers found matching the criteria.",
+        device=device,
+    )
 
 @mcp.tool(name="get_dhcp_server", annotations=annotate(READ, "Get DHCP Server"))
-async def mikrotik_get_dhcp_server(ctx: Context, name: str, device: Optional[str] = None) -> str:
-    """Gets detailed information about a specific DHCP server."""
+async def mikrotik_get_dhcp_server(
+    ctx: Context,
+    name: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+    device: Optional[str] = None,
+) -> str:
+    """Gets detailed information about a specific DHCP server.
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/dhcp-server
+    """
     await ctx.info(f"Getting DHCP server details: name={name}")
 
-    cmd = f'/ip dhcp-server print detail where name="{name}"'
-    result = await execute_mikrotik_command(cmd, ctx, device=device)
-
-    if not result or result.strip() == "":
-        return f"DHCP server '{name}' not found."
-
-    return f"DHCP SERVER DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/ip dhcp-server",
+        where=[f'name="{name}"'],
+        proplist=proplist,
+        output=output,
+        scope="dhcp",
+        empty_message=f"DHCP server '{name}' not found.",
+        device=device,
+    )
 
 @mcp.tool(name="create_dhcp_network", annotations=annotate(WRITE, "Create DHCP Network"))
 async def mikrotik_create_dhcp_network(

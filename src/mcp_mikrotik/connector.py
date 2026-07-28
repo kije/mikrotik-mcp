@@ -47,7 +47,7 @@ def upload_file_sync(filename: str, data: bytes, device: Optional[str] = None) -
 
 
 async def execute_mikrotik_command(
-    command: str, ctx: Context, device: Optional[str] = None
+    command: str, ctx: Optional[Context] = None, device: Optional[str] = None
 ) -> str:
     """Execute a MikroTik command on the selected device and return the output.
 
@@ -57,8 +57,17 @@ async def execute_mikrotik_command(
     When Safe Mode is active *for that device* the command is routed through
     that device's persistent interactive shell so it runs inside the safe-mode
     context.
+
+    ``ctx`` is optional so this can also back MCP *resource* handlers, which
+    (unlike tools) are not given a per-request :class:`Context`. When ``ctx``
+    is ``None`` progress is logged only to the module logger.
     """
     from .safe_mode import get_safe_mode_manager
+
+    async def _notify(level: str, message: str) -> None:
+        if ctx is None:
+            return
+        await getattr(ctx, level)(message)
 
     # Resolve the target first so a bad/missing device is reported clearly and
     # never silently executed somewhere else.
@@ -66,18 +75,18 @@ async def execute_mikrotik_command(
         target = get_inventory().resolve(device)
     except DeviceNotFoundError as exc:
         msg = f"Error: {exc}"
-        await ctx.error(msg)
+        await _notify("error", msg)
         return msg
 
     safe_mgr = get_safe_mode_manager(target.title)
     if safe_mgr.is_active:
-        await ctx.info(f"Executing on '{target.title}' (safe mode): {command}")
+        await _notify("info", f"Executing on '{target.title}' (safe mode): {command}")
         try:
             result = await asyncio.to_thread(safe_mgr.execute, command)
         except Exception as e:
             result = f"Error executing command in safe mode session: {str(e)}"
     else:
-        await ctx.info(f"Executing on '{target.title}': {command}")
+        await _notify("info", f"Executing on '{target.title}': {command}")
         try:
             result = await asyncio.to_thread(_execute_sync, command, target.title)
         except ConnectionError as e:
@@ -87,5 +96,5 @@ async def execute_mikrotik_command(
 
     logger.info(f"Command result: {repr(result)}")
     if result.startswith("Error"):
-        await ctx.error(result)
+        await _notify("error", result)
     return result

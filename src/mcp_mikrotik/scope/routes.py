@@ -2,6 +2,7 @@ from typing import Optional, List
 from ..connector import execute_mikrotik_command
 from mcp.server.mcpserver import Context
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
+from ..routeros import OutputFormat, print_resource
 
 @mcp.tool(name="add_route", annotations=annotate(WRITE, "Add Route"))
 async def mikrotik_add_route(
@@ -85,12 +86,24 @@ async def mikrotik_list_routes(
     disabled_only: bool = False,
     dynamic_only: bool = False,
     static_only: bool = False,
-    device: Optional[str] = None
+    proplist: Optional[str] = None,
+    output: OutputFormat = "json",
+    device: Optional[str] = None,
 ) -> str:
-    """Lists routes in MikroTik routing table."""
-    await ctx.info(f"Listing routes with filters: dst={dst_filter}, gateway={gateway_filter}")
+    """Lists routes in MikroTik routing table.
 
-    cmd = "/ip route print"
+    By default returns parsed JSON ``{count, records, documentation}`` where each
+    record includes its stable ``.id`` (via ``show-ids``) for use in follow-up
+    ``get``/``update``/``remove`` calls.
+
+    - ``proplist``: comma-separated fields to return (e.g. ``"dst-address,gateway"``)
+      so the client fetches only what it needs.
+    - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
+      ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/route
+    """
+    await ctx.info(f"Listing routes with filters: dst={dst_filter}, gateway={gateway_filter}")
 
     filters = []
     if dst_filter:
@@ -110,32 +123,48 @@ async def mikrotik_list_routes(
     if static_only:
         filters.append("static=yes")
 
-    if filters:
-        cmd += " where " + " ".join(filters)
-
-    result = await execute_mikrotik_command(cmd, ctx, device=device)
-
-    if not result or result.strip() == "" or result.strip() == "no such item":
-        return "No routes found matching the criteria."
-
-    return f"ROUTES:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/ip route",
+        where=filters,
+        proplist=proplist,
+        output=output,
+        scope="routes",
+        empty_message="No routes found matching the criteria.",
+        device=device,
+    )
 
 @mcp.tool(name="get_route", annotations=annotate(READ, "Get Route"))
-async def mikrotik_get_route(ctx: Context, route_id: str, device: Optional[str] = None) -> str:
+async def mikrotik_get_route(
+    ctx: Context,
+    route_id: str,
+    proplist: Optional[str] = None,
+    output: OutputFormat = "detail",
+    device: Optional[str] = None,
+) -> str:
     """Gets detailed information about a specific route.
 
     Notes:
         route_id: "*N" or "N" from list output e.g. "*3"
+
+    - ``output``: ``detail`` (default, verbose text) | ``json`` (parsed) |
+      ``terse`` (one-line) | ``raw``.
+    - ``proplist``: comma-separated fields to return.
+
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/route
     """
     await ctx.info(f"Getting route details: route_id={route_id}")
 
-    cmd = f"/ip route print detail where .id={route_id}"
-    result = await execute_mikrotik_command(cmd, ctx, device=device)
-
-    if not result or result.strip() == "":
-        return f"Route with ID '{route_id}' not found."
-
-    return f"ROUTE DETAILS:\n\n{result}"
+    return await print_resource(
+        ctx,
+        "/ip route",
+        where=[f".id={route_id}"],
+        proplist=proplist,
+        output=output,
+        scope="routes",
+        empty_message=f"Route with ID '{route_id}' not found.",
+        device=device,
+    )
 
 @mcp.tool(name="update_route", annotations=annotate(WRITE_IDEMPOTENT, "Update Route"))
 async def mikrotik_update_route(
