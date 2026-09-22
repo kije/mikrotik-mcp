@@ -8,11 +8,15 @@ Tools that list a configuration object or fetch one by id/name share two
 options:
 
 - **`output`** — `json` (default; parsed `{count, records, documentation}`
-  where each record carries its stable `.id` via `show-ids`, plus `_index` and
-  decoded `_flags`), `terse` (raw one-line records), `detail` (verbose text), or
-  `raw` (legacy plain `print` text for backward compatibility).
+  where each record carries its stable `.id` via `show-ids` and its flags
+  decoded by name, e.g. `"_flags": ["disabled", "dynamic"]`), `terse` (raw
+  one-line records), `detail` (verbose text), or `raw` (legacy plain `print`
+  text for backward compatibility). In `json` mode a device error (unknown
+  menu, bad field name, …) is reported as a tool error, never as an empty list.
 - **`proplist`** — comma-separated field names (e.g. `"address,interface"`) so
-  the client fetches only the fields it needs.
+  the client fetches only the fields it needs. Names are validated
+  (`[a-z0-9-]`, optional leading `.`), and every filter value is sent as an
+  escaped RouterOS string, so neither can smuggle in a second command.
 
 Each response includes a `documentation` link to the relevant
 [RouterOS manual](https://manual.mikrotik.com/docs/introduction/) page. The same

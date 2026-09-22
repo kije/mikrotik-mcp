@@ -4,7 +4,7 @@ from mcp.server.mcpserver import Context
 
 from ..connector import execute_mikrotik_command
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 @mcp.tool(name="set_dns_servers", annotations=annotate(WRITE, "Set DNS Servers"))
 async def mikrotik_set_dns_servers(
@@ -163,17 +163,17 @@ async def mikrotik_list_dns_static(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/dns
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/dns/
     """
     await ctx.info(f"Listing static DNS entries with filters: name={name_filter}")
 
     filters = []
     if name_filter:
-        filters.append(f'name~"{name_filter}"')
+        filters.append(f'name~{ros_str(name_filter)}')
     if address_filter:
-        filters.append(f'address~"{address_filter}"')
+        filters.append(f'address~{ros_str(address_filter)}')
     if type_filter:
-        filters.append(f'type="{type_filter}"')
+        filters.append(f'type={ros_str(type_filter)}')
     if disabled_only:
         filters.append("disabled=yes")
     if regexp_only:
@@ -202,14 +202,14 @@ async def mikrotik_get_dns_static(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/dns
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/dns/
     """
     await ctx.info(f"Getting static DNS entry details: entry_id={entry_id}")
 
     return await print_resource(
         ctx,
         "/ip dns static",
-        where=[f".id={entry_id}"],
+        where=[f".id={ros_str(entry_id)}"],
         proplist=proplist,
         output=output,
         scope="dns",
@@ -311,7 +311,7 @@ async def mikrotik_remove_dns_static(ctx: Context, entry_id: str) -> str:
     """Removes a static DNS entry."""
     await ctx.info(f"Removing static DNS entry: entry_id={entry_id}")
 
-    check_cmd = f"/ip dns static print count-only where .id={entry_id}"
+    check_cmd = f"/ip dns static print count-only where .id={ros_str(entry_id)}"
     count = await execute_mikrotik_command(check_cmd, ctx)
 
     if count.strip() == "0":

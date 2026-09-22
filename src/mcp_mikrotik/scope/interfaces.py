@@ -2,7 +2,7 @@ from typing import Literal, Optional
 from ..connector import execute_mikrotik_command
 from mcp.server.mcpserver import Context
 from ..app import mcp, READ, WRITE_IDEMPOTENT, annotate
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 
 @mcp.tool(name="list_interfaces", annotations=annotate(READ, "List Interfaces"))
@@ -33,15 +33,15 @@ async def mikrotik_list_interfaces(
         output: "json" (default, parsed) | "terse" (raw one-line records) |
             "detail" (verbose) | "raw" (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/interface
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/
     """
     await ctx.info("Listing all interfaces")
 
     filters = []
     if type_filter:
-        filters.append(f'type="{type_filter}"')
+        filters.append(f'type={ros_str(type_filter)}')
     if name_filter:
-        filters.append(f'name~"{name_filter}"')
+        filters.append(f'name~{ros_str(name_filter)}')
     if running_only:
         filters.append("running=yes")
     if disabled_only:
@@ -73,14 +73,14 @@ async def mikrotik_get_interface(
             "terse" (one-line) | "raw".
         proplist: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/interface
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/
     """
     await ctx.info(f"Getting interface details: name={name}")
 
     return await print_resource(
         ctx,
         "/interface",
-        where=[f'name="{name}"'],
+        where=[f'name={ros_str(name)}'],
         proplist=proplist,
         output=output,
         scope="interfaces",

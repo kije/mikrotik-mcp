@@ -2,7 +2,7 @@ from typing import Literal, Optional, List
 from mcp.server.mcpserver import Context
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, DANGEROUS, annotate
 from ..connector import execute_mikrotik_command
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 @mcp.tool(name="create_filter_rule", annotations=annotate(WRITE, "Create Firewall Filter Rule"))
 async def mikrotik_create_filter_rule(
@@ -152,24 +152,24 @@ async def mikrotik_list_filter_rules(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/firewall/filter
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/firewall/filter/
     """
     await ctx.info(f"Listing firewall filter rules with filters: chain={chain_filter}, action={action_filter}")
 
     # Add filters
     filters = []
     if chain_filter:
-        filters.append(f"chain={chain_filter}")
+        filters.append(f"chain={ros_str(chain_filter)}")
     if action_filter:
-        filters.append(f"action={action_filter}")
+        filters.append(f"action={ros_str(action_filter)}")
     if src_address_filter:
-        filters.append(f'src-address~"{src_address_filter}"')
+        filters.append(f'src-address~{ros_str(src_address_filter)}')
     if dst_address_filter:
-        filters.append(f'dst-address~"{dst_address_filter}"')
+        filters.append(f'dst-address~{ros_str(dst_address_filter)}')
     if protocol_filter:
-        filters.append(f"protocol={protocol_filter}")
+        filters.append(f"protocol={ros_str(protocol_filter)}")
     if interface_filter:
-        filters.append(f'(in-interface~"{interface_filter}" or out-interface~"{interface_filter}")')
+        filters.append(f'(in-interface~{ros_str(interface_filter)} or out-interface~{ros_str(interface_filter)})')
     if disabled_only:
         filters.append("disabled=yes")
     if invalid_only:
@@ -203,12 +203,12 @@ async def mikrotik_get_filter_rule(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/firewall/filter
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/firewall/filter/
     """
     await ctx.info(f"Getting firewall filter rule details: rule_id={rule_id}")
 
     count = await execute_mikrotik_command(
-        f'/ip firewall filter print count-only where .id={rule_id}', ctx
+        f'/ip firewall filter print count-only where .id={ros_str(rule_id)}', ctx
     )
     if not (count.strip().isdigit() and int(count.strip()) > 0):
         return f"Firewall filter rule with ID '{rule_id}' not found."
@@ -216,7 +216,7 @@ async def mikrotik_get_filter_rule(
     return await print_resource(
         ctx,
         "/ip firewall filter",
-        where=[f".id={rule_id}"],
+        where=[f".id={ros_str(rule_id)}"],
         proplist=proplist,
         output=output,
         scope="firewall_filter",
@@ -368,7 +368,7 @@ async def mikrotik_remove_filter_rule(ctx: Context, rule_id: str) -> str:
     await ctx.info(f"Removing firewall filter rule: rule_id={rule_id}")
 
     # First check if the rule exists
-    check_cmd = f"/ip firewall filter print count-only where .id={rule_id}"
+    check_cmd = f"/ip firewall filter print count-only where .id={ros_str(rule_id)}"
     count = await execute_mikrotik_command(check_cmd, ctx)
 
     if count.strip() == "0":
@@ -394,7 +394,7 @@ async def mikrotik_move_filter_rule(ctx: Context, rule_id: str, destination: int
     await ctx.info(f"Moving firewall filter rule: rule_id={rule_id} to position {destination}")
 
     # Check if the rule exists
-    check_cmd = f"/ip firewall filter print count-only where .id={rule_id}"
+    check_cmd = f"/ip firewall filter print count-only where .id={ros_str(rule_id)}"
     count = await execute_mikrotik_command(check_cmd, ctx)
 
     if count.strip() == "0":

@@ -1,11 +1,11 @@
 # IP Address Management
 
-> 📖 Official RouterOS docs: <https://manual.mikrotik.com/docs/cli-reference/ip/address>
+> 📖 Official RouterOS docs: <https://manual.mikrotik.com/docs/cli-reference/ip/address/>
 >
 > **Structured output (new).** The list/get tools default to parsed **JSON**
 > (`{count, records, documentation}`). Each record carries its stable `.id`
 > (via `show-ids`) so follow-up `get`/`remove` calls can reference it, plus
-> `_index` and decoded `_flags`. Two shared options are available on these
+> its flags decoded by name (`"_flags": ["disabled"]`). Two shared options are available on these
 > tools:
 > - `proplist` — comma-separated field names to return only what you need
 >   (e.g. `"address,interface"`), reducing output size.

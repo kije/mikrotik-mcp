@@ -25,41 +25,56 @@ class ScopeDoc(NamedTuple):
 
     #: Human-readable title of the configuration object.
     title: str
-    #: Documentation page path, relative to :data:`DOCS_BASE` (starts with "/").
+    #: Documentation page path, relative to :data:`DOCS_BASE` (starts with
+    #: "/", no trailing slash).
     path: str
+    #: ``True`` for a section page — a menu with sub-menus (``/ip/pool``), whose
+    #: Markdown source is ``…/pool/pool.md`` rather than ``…/pool.md``.
+    section: bool = False
 
     @property
     def url(self) -> str:
-        """Rendered HTML documentation URL."""
-        return f"{DOCS_BASE}{self.path}"
+        """Rendered HTML documentation URL.
+
+        Always with a trailing slash: without one the site answers with a
+        redirect to the plain-``http://`` URL.
+        """
+        return f"{DOCS_BASE}{self.path}/"
 
     @property
     def markdown_url(self) -> str:
-        """Raw-Markdown variant of the page (``…/foo.md``) for LLM ingestion."""
+        """Raw-Markdown variant of the page, for LLM ingestion."""
+        if self.section:
+            return f"{DOCS_BASE}{self.path}/{self.path.rsplit('/', 1)[-1]}.md"
         return f"{DOCS_BASE}{self.path}.md"
 
 
 # Keyed by the scope module name (``mcp_mikrotik.scope.<name>``) so a tool can
 # resolve its own docs via ``doc_for(__name__)`` without hard-coding a string.
+# Paths follow https://manual.mikrotik.com/sitemap.xml; ``test_docs_refs``
+# has an opt-in check that every URL resolves.
+_CLI = "/docs/cli-reference"
 SCOPE_DOCS: Dict[str, ScopeDoc] = {
-    "ip_address": ScopeDoc("IP Addressing", "/docs/cli-reference/ip/address"),
-    "ipv6_address": ScopeDoc("IPv6 Addressing", "/docs/cli-reference/ipv6/address"),
-    "ip_pool": ScopeDoc("IP Pools", "/docs/cli-reference/ip/pool"),
-    "dhcp": ScopeDoc("DHCP Server & Client", "/docs/cli-reference/ip/dhcp-server"),
-    "dns": ScopeDoc("DNS", "/docs/cli-reference/ip/dns"),
-    "firewall_filter": ScopeDoc("Firewall Filter", "/docs/cli-reference/ip/firewall/filter"),
-    "firewall_nat": ScopeDoc("Firewall NAT", "/docs/cli-reference/ip/firewall/nat"),
-    "interfaces": ScopeDoc("Interfaces", "/docs/cli-reference/interface/interface"),
-    "vlan": ScopeDoc("VLAN Interfaces", "/docs/cli-reference/interface/vlan"),
-    "wireless": ScopeDoc("Wireless / WiFi", "/docs/cli-reference/interface/wifi"),
-    "wireguard": ScopeDoc("WireGuard", "/docs/cli-reference/interface/wireguard"),
-    "routes": ScopeDoc("IP Routes", "/docs/cli-reference/ip/route"),
-    "queue": ScopeDoc("Queues (QoS)", "/docs/cli-reference/queue/simple"),
-    "poe": ScopeDoc("Power over Ethernet (PoE-out)", "/docs/hardware/poe-out"),
-    "users": ScopeDoc("User Management", "/docs/cli-reference/user"),
-    "logs": ScopeDoc("Logging", "/docs/cli-reference/log"),
-    "backup": ScopeDoc("Backup & Configuration Export", "/docs/cli-reference/system/backup"),
-    "safe_mode": ScopeDoc("Safe Mode", "/docs/introduction/"),
+    "ip_address": ScopeDoc("IP Addressing", f"{_CLI}/ip/address"),
+    "ipv6_address": ScopeDoc("IPv6 Addressing", f"{_CLI}/ipv6/address"),
+    "ip_pool": ScopeDoc("IP Pools", f"{_CLI}/ip/pool", section=True),
+    "dhcp": ScopeDoc("DHCP Server & Client", f"{_CLI}/ip/dhcp-server", section=True),
+    "dns": ScopeDoc("DNS", f"{_CLI}/ip/dns", section=True),
+    "firewall_filter": ScopeDoc("Firewall Filter", f"{_CLI}/ip/firewall/filter", section=True),
+    "firewall_nat": ScopeDoc("Firewall NAT", f"{_CLI}/ip/firewall/nat", section=True),
+    "interfaces": ScopeDoc("Interfaces", f"{_CLI}/interface", section=True),
+    "vlan": ScopeDoc("VLAN Interfaces", f"{_CLI}/interface/vlan"),
+    "wireless": ScopeDoc("Wireless / WiFi", f"{_CLI}/interface/wifi", section=True),
+    "wireguard": ScopeDoc("WireGuard", f"{_CLI}/interface/wireguard", section=True),
+    "routes": ScopeDoc("IP Routes", f"{_CLI}/ip/route", section=True),
+    "queue": ScopeDoc("Simple Queues (QoS)", f"{_CLI}/queue/simple", section=True),
+    "queue_tree": ScopeDoc("Queue Trees (QoS)", f"{_CLI}/queue/tree", section=True),
+    "queue_type": ScopeDoc("Queue Types", f"{_CLI}/queue/type"),
+    "poe": ScopeDoc("Power over Ethernet (PoE-out)", f"{_CLI}/interface/ethernet/poe", section=True),
+    "users": ScopeDoc("User Management", f"{_CLI}/user", section=True),
+    "logs": ScopeDoc("Logging", f"{_CLI}/log"),
+    "backup": ScopeDoc("Backup & Configuration Export", f"{_CLI}/system/backup/save"),
+    "safe_mode": ScopeDoc("Safe Mode", f"{_CLI}/safe-mode"),
 }
 
 
