@@ -1,20 +1,29 @@
-from mcp.server.fastmcp import FastMCP
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import Response
 
-mcp = FastMCP("mcp-mikrotik")
+try:
+    _VERSION = _pkg_version("mcp-server-mikrotik")
+except PackageNotFoundError:  # running from a source tree without an install
+    _VERSION = "0.0.0.dev0"
+
+# mcp 2.x reports an empty serverInfo.version unless one is passed (v1 reported
+# the SDK's own version, which was never this server's version anyway).
+mcp = MCPServer("mcp-mikrotik", version=_VERSION)
 
 # ── Behaviour presets ──────────────────────────────────────────────────────
 # These capture the *risk profile* of a tool (MCP spec §Tool Annotations).
 # Always pass them through annotate() so every tool also carries a short
 # human-readable title, which allows MCP clients to surface compact tool
 # lists without re-rendering full descriptions — shrinking prompt context.
-READ = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
-WRITE = ToolAnnotations(destructiveHint=False, openWorldHint=False)
-WRITE_IDEMPOTENT = ToolAnnotations(destructiveHint=False, idempotentHint=True, openWorldHint=False)
-DESTRUCTIVE = ToolAnnotations(destructiveHint=True, idempotentHint=True, openWorldHint=False)
-DANGEROUS = ToolAnnotations(destructiveHint=True, openWorldHint=False)
+READ = ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False)
+WRITE = ToolAnnotations(destructive_hint=False, open_world_hint=False)
+WRITE_IDEMPOTENT = ToolAnnotations(destructive_hint=False, idempotent_hint=True, open_world_hint=False)
+DESTRUCTIVE = ToolAnnotations(destructive_hint=True, idempotent_hint=True, open_world_hint=False)
+DANGEROUS = ToolAnnotations(destructive_hint=True, open_world_hint=False)
 
 
 def annotate(base: ToolAnnotations, title: str) -> ToolAnnotations:
@@ -29,13 +38,7 @@ def annotate(base: ToolAnnotations, title: str) -> ToolAnnotations:
         @mcp.tool(name="get_dns_settings", annotations=annotate(READ, "DNS Settings"))
         async def mikrotik_get_dns_settings(ctx: Context) -> str: ...
     """
-    return ToolAnnotations(
-        title=title,
-        readOnlyHint=base.readOnlyHint,
-        destructiveHint=base.destructiveHint,
-        idempotentHint=base.idempotentHint,
-        openWorldHint=base.openWorldHint,
-    )
+    return base.model_copy(update={"title": title})
 
 
 # Only available on HTTP transports (sse, streamable-http)

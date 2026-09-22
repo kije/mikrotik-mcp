@@ -11,7 +11,7 @@ This MCP (Model Context Protocol) server provides tools for managing MikroTik Ro
 ```
 src/mcp_mikrotik/
 ├── scope/          # Feature modules — each file registers MCP tools via decorators
-├── app.py          # FastMCP instance and ToolAnnotation constants
+├── app.py          # MCPServer instance and ToolAnnotation constants
 ├── config.py       # Configuration (pydantic-settings, CLI args, env vars)
 ├── connector.py    # SSH connection handling
 ├── server.py       # Entry point — imports scopes, starts the server
@@ -42,7 +42,7 @@ Your scope file should:
 **Example structure**:
 ```python
 from typing import Optional
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 from ..connector import execute_mikrotik_command
 from ..app import mcp, READ, WRITE, annotate
 

@@ -15,7 +15,7 @@ two kinds:
 
 The logs resource (``mikrotik://logs/recent``) is intentionally *pollable*
 rather than push-subscribed: MCP resource subscriptions are a notify-then-
-refetch mechanism with no ergonomic FastMCP support today, so a client that
+refetch mechanism with no ergonomic MCPServer support today, so a client that
 wants fresh logs simply re-reads this resource. A true subscription remains a
 future enhancement.
 """
