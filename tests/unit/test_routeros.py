@@ -32,16 +32,15 @@ def test_build_print_default_is_terse_showids():
     assert cmd == "/ip address print terse show-ids without-paging"
 
 
-def test_build_print_with_proplist_and_where_and_limit():
+def test_build_print_with_proplist_and_where():
     cmd = build_print_command(
         "/ip address",
         where=['interface="ether1"'],
         proplist="address, interface ,network",
-        limit=10,
     )
     assert cmd == (
         "/ip address print terse show-ids without-paging "
-        'proplist=address,interface,network where interface="ether1" limit=10'
+        'proplist=address,interface,network where interface="ether1"'
     )
 
 
@@ -194,3 +193,20 @@ def test_print_resource_json_surfaces_errors(monkeypatch):
     _patch_exec(monkeypatch, error)
     out = asyncio.run(print_resource(None, "/ip address", output="json", device="nope"))
     assert out == error
+
+
+def test_print_resource_limit_is_client_side(monkeypatch):
+    """RouterOS print has no limit= parameter; keep the last N records locally."""
+    calls = _patch_exec(monkeypatch, TERSE_SAMPLE)
+    out = asyncio.run(print_resource(None, "/ip address", output="json", limit=1))
+    assert "limit" not in calls[0]
+    payload = json.loads(out)
+    assert payload["count"] == 1
+    assert payload["records"][0]["address"] == json.loads(
+        asyncio.run(print_resource(None, "/ip address", output="json"))
+    )["records"][-1]["address"]
+
+    terse = asyncio.run(print_resource(None, "/ip address", output="terse", limit=1))
+    assert [l for l in terse.splitlines() if "=" in l] == [
+        l for l in TERSE_SAMPLE.splitlines() if "=" in l
+    ][-1:]

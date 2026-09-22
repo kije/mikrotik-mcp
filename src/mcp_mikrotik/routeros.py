@@ -62,7 +62,6 @@ def build_print_command(
     show_ids: bool = True,
     detail: bool = False,
     count_only: bool = False,
-    limit: Optional[int] = None,
 ) -> str:
     """Assemble a ``<path> print …`` command from structured options.
 
@@ -93,10 +92,6 @@ def build_print_command(
 
     cmd = " ".join(parts)
     cmd += build_where(where or [])
-
-    if limit is not None:
-        cmd += f" limit={limit}"
-
     return cmd
 
 
@@ -248,6 +243,10 @@ async def print_resource(
 
     ``proplist`` (comma-separated field names) is honoured in every mode except
     ``raw``, letting the caller trim the returned fields.
+
+    ``limit`` keeps only the last *N* records (the newest, for ``/log``) in the
+    ``json`` and ``terse`` modes. It is applied here rather than on the device
+    because RouterOS ``print`` has no ``limit`` parameter.
     """
     detail = output == "detail"
     terse = output in ("json", "terse")
@@ -259,7 +258,6 @@ async def print_resource(
         terse=terse,
         show_ids=show_ids and output != "raw",
         detail=detail,
-        limit=limit,
     )
 
     result = await execute_mikrotik_command(cmd, ctx, device=device)
@@ -271,9 +269,15 @@ async def print_resource(
 
     if output == "json":
         records = parse_terse(result)
-        if not records:
-            return render_json([], scope=scope)
+        if limit is not None:
+            records = records[-limit:] if limit > 0 else []
         return render_json(records, scope=scope)
+
+    if output == "terse" and limit is not None:
+        lines = result.splitlines()
+        data = [i for i, line in enumerate(lines) if _is_data_line(line)]
+        drop = set(data[:-limit] if limit > 0 else data)
+        result = "\n".join(line for i, line in enumerate(lines) if i not in drop)
 
     if not result or not result.strip() or result.strip() == "no such item":
         return empty_message or "No matching items found."
