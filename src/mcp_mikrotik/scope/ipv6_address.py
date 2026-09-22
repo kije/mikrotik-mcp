@@ -4,7 +4,7 @@ from typing import Optional
 from ..connector import execute_mikrotik_command
 from mcp.server.mcpserver import Context
 from ..app import mcp, READ, WRITE, DESTRUCTIVE, annotate
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 
 def _canonical_ipv6(value: str) -> str:
@@ -110,7 +110,7 @@ async def mikrotik_list_ipv6_addresses(
         output: "json" (default, parsed) | "terse" (raw one-line records) |
             "detail" (verbose) | "raw" (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ipv6/address
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ipv6/address/
     """
     await ctx.info(
         f"Listing IPv6 addresses with filters: interface={interface_filter}, address={address_filter}"
@@ -118,9 +118,9 @@ async def mikrotik_list_ipv6_addresses(
 
     filters = []
     if interface_filter:
-        filters.append(f'interface="{interface_filter}"')
+        filters.append(f'interface={ros_str(interface_filter)}')
     if address_filter:
-        filters.append(f'address~"{address_filter}"')
+        filters.append(f'address~{ros_str(address_filter)}')
     if disabled_only:
         filters.append("disabled=yes")
     if dynamic_only:
@@ -157,7 +157,7 @@ async def mikrotik_get_ipv6_address(
             "terse" (one-line) | "raw".
         proplist: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ipv6/address
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ipv6/address/
     """
     await ctx.info(f"Getting IPv6 address details: address_id={address_id}")
 
@@ -166,9 +166,9 @@ async def mikrotik_get_ipv6_address(
     # trying the matching attribute first.
     addr = _canonical_ipv6(address_id)
     if ":" in address_id:
-        queries = [f'address="{addr}"', f'.id="{address_id}"']
+        queries = [f'address={ros_str(addr)}', f'.id={ros_str(address_id)}']
     else:
-        queries = [f'.id="{address_id}"', f'address="{addr}"']
+        queries = [f'.id={ros_str(address_id)}', f'address={ros_str(addr)}']
 
     selector = None
     for where in queries:
@@ -206,7 +206,7 @@ async def mikrotik_remove_ipv6_address(ctx: Context, address_id: str) -> str:
     addr = _canonical_ipv6(address_id)
 
     # Try to find by ID first
-    check_cmd = f'/ipv6 address print count-only where .id="{address_id}"'
+    check_cmd = f'/ipv6 address print count-only where .id={ros_str(address_id)}'
     count = await execute_mikrotik_command(check_cmd, ctx)
 
     if count.strip() == "0":

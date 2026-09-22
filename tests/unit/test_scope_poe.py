@@ -55,12 +55,13 @@ def test_list_poe_command_and_filter(ctx, monkeypatch):
     # print_resource imports the executor from routeros, patch there too.
     monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
 
+    legend = "; /interface ethernet poe print detail where false"
     _run(poe.mikrotik_list_poe(ctx))
-    assert fake.commands[-1] == "/interface ethernet poe print terse show-ids without-paging"
+    assert fake.commands[-1] == "/interface ethernet poe print terse show-ids without-paging" + legend
 
     _run(poe.mikrotik_list_poe(ctx, interface_filter="ether"))
     assert fake.commands[-1] == (
-        '/interface ethernet poe print terse show-ids without-paging where name~"ether"'
+        '/interface ethernet poe print terse show-ids without-paging where name~"ether"' + legend
     )
 
 

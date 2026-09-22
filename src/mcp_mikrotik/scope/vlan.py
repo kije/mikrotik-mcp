@@ -3,7 +3,7 @@ from pydantic import Field
 from ..connector import execute_mikrotik_command
 from mcp.server.mcpserver import Context
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 @mcp.tool(name="create_vlan_interface", annotations=annotate(WRITE, "Create VLAN"))
 async def mikrotik_create_vlan_interface(
@@ -90,17 +90,17 @@ async def mikrotik_list_vlan_interfaces(
     - ``output``: "json" (default, parsed) | "terse" (raw one-line records) |
       "detail" (verbose) | "raw" (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/vlan
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/vlan/
     """
     await ctx.info(f"Listing VLAN interfaces with filters: name={name_filter}, vlan_id={vlan_id_filter}, interface={interface_filter}")
 
     filters = []
     if name_filter:
-        filters.append(f'name~"{name_filter}"')
+        filters.append(f'name~{ros_str(name_filter)}')
     if vlan_id_filter:
-        filters.append(f"vlan-id={vlan_id_filter}")
+        filters.append(f"vlan-id={ros_str(vlan_id_filter)}")
     if interface_filter:
-        filters.append(f'interface="{interface_filter}"')
+        filters.append(f'interface={ros_str(interface_filter)}')
     if disabled_only:
         filters.append("disabled=yes")
 
@@ -127,14 +127,14 @@ async def mikrotik_get_vlan_interface(
       "terse" (one-line) | "raw".
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/vlan
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/vlan/
     """
     await ctx.info(f"Getting VLAN interface details: name={name}")
 
     return await print_resource(
         ctx,
         "/interface vlan",
-        where=[f'name="{name}"'],
+        where=[f'name={ros_str(name)}'],
         proplist=proplist,
         output=output,
         scope="vlan",

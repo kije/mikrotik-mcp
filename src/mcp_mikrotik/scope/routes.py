@@ -2,7 +2,7 @@ from typing import Optional, List
 from ..connector import execute_mikrotik_command
 from mcp.server.mcpserver import Context
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 @mcp.tool(name="add_route", annotations=annotate(WRITE, "Add Route"))
 async def mikrotik_add_route(
@@ -97,17 +97,17 @@ async def mikrotik_list_routes(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/route
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/route/
     """
     await ctx.info(f"Listing routes with filters: dst={dst_filter}, gateway={gateway_filter}")
 
     filters = []
     if dst_filter:
-        filters.append(f'dst-address~"{dst_filter}"')
+        filters.append(f'dst-address~{ros_str(dst_filter)}')
     if gateway_filter:
-        filters.append(f'gateway~"{gateway_filter}"')
+        filters.append(f'gateway~{ros_str(gateway_filter)}')
     if routing_mark_filter:
-        filters.append(f'routing-mark="{routing_mark_filter}"')
+        filters.append(f'routing-mark={ros_str(routing_mark_filter)}')
     if distance_filter is not None:
         filters.append(f"distance={distance_filter}")
     if active_only:
@@ -145,14 +145,14 @@ async def mikrotik_get_route(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/route
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/route/
     """
     await ctx.info(f"Getting route details: route_id={route_id}")
 
     return await print_resource(
         ctx,
         "/ip route",
-        where=[f".id={route_id}"],
+        where=[f".id={ros_str(route_id)}"],
         proplist=proplist,
         output=output,
         scope="routes",
@@ -245,7 +245,7 @@ async def mikrotik_remove_route(ctx: Context, route_id: str) -> str:
     """
     await ctx.info(f"Removing route: route_id={route_id}")
 
-    check_cmd = f"/ip route print count-only where .id={route_id}"
+    check_cmd = f"/ip route print count-only where .id={ros_str(route_id)}"
     count = await execute_mikrotik_command(check_cmd, ctx)
 
     if count.strip() == "0":
@@ -291,9 +291,9 @@ async def mikrotik_get_routing_table(
 
     filters = []
     if table_name and table_name != "main":
-        filters.append(f'routing-table="{table_name}"')
+        filters.append(f'routing-table={ros_str(table_name)}')
     if protocol_filter:
-        filters.append(f'protocol="{protocol_filter}"')
+        filters.append(f'protocol={ros_str(protocol_filter)}')
     if active_only:
         filters.append("active=yes")
 

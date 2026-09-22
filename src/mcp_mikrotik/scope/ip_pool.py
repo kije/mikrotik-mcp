@@ -4,7 +4,7 @@ from mcp.server.mcpserver import Context
 
 from ..connector import execute_mikrotik_command
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 @mcp.tool(name="create_ip_pool", annotations=annotate(WRITE, "Add IP Pool"))
 async def mikrotik_create_ip_pool(
@@ -81,15 +81,15 @@ async def mikrotik_list_ip_pools(
     Note: per-pool used-address counts are available via ``list_ip_pool_used``
     or ``get_ip_pool``.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/pool
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/pool/
     """
     await ctx.info(f"Listing IP pools with filters: name={name_filter}, ranges={ranges_filter}")
 
     filters = []
     if name_filter:
-        filters.append(f'name~"{name_filter}"')
+        filters.append(f'name~{ros_str(name_filter)}')
     if ranges_filter:
-        filters.append(f'ranges~"{ranges_filter}"')
+        filters.append(f'ranges~{ros_str(ranges_filter)}')
 
     return await print_resource(
         ctx,
@@ -116,14 +116,14 @@ async def mikrotik_get_ip_pool(
 
     Note: per-pool used-address counts are available via ``list_ip_pool_used``.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/pool
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/pool/
     """
     await ctx.info(f"Getting IP pool details: name={name}")
 
     return await print_resource(
         ctx,
         "/ip pool",
-        where=[f'name="{name}"'],
+        where=[f'name={ros_str(name)}'],
         proplist=proplist,
         output=output,
         scope="ip_pool",
@@ -239,19 +239,19 @@ async def mikrotik_list_ip_pool_used(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/pool
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/pool/
     """
     await ctx.info(f"Listing used IP pool addresses: pool={pool_name}, address={address_filter}")
 
     filters = []
     if pool_name:
-        filters.append(f'pool="{pool_name}"')
+        filters.append(f'pool={ros_str(pool_name)}')
     if address_filter:
-        filters.append(f'address~"{address_filter}"')
+        filters.append(f'address~{ros_str(address_filter)}')
     if mac_filter:
-        filters.append(f'mac-address~"{mac_filter}"')
+        filters.append(f'mac-address~{ros_str(mac_filter)}')
     if info_filter:
-        filters.append(f'info~"{info_filter}"')
+        filters.append(f'info~{ros_str(info_filter)}')
 
     return await print_resource(
         ctx,

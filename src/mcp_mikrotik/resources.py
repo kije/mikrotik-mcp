@@ -25,7 +25,11 @@ from typing import List, Tuple
 
 from .app import mcp
 from .docs_refs import DOCS_INTRO, SCOPE_DOCS, doc_for
-from .routeros import print_resource
+from .connector import execute_mikrotik_command
+from .routeros import RouterOSError, parse_log_terse, print_resource, render_json
+
+#: How many entries ``mikrotik://logs/recent`` returns.
+RECENT_LOG_ENTRIES = 50
 
 
 # ── Documentation resources ────────────────────────────────────────────────
@@ -129,5 +133,13 @@ for _uri, _path, _scope, _name in CONFIG_SNAPSHOTS:
     mime_type="application/json",
 )
 async def recent_logs() -> str:
-    """Pollable logs resource (stand-in for a push subscription)."""
-    return await print_resource(None, "/log", output="json", limit=50, scope="logs")
+    """Pollable logs resource (stand-in for a push subscription).
+
+    ``print`` has no limit argument, so the tail is taken client-side; the
+    device's memory log buffer is small (1000 lines by default).
+    """
+    result = await execute_mikrotik_command("/log print terse show-ids without-paging")
+    if result.startswith("Error"):
+        raise RouterOSError(result)
+    entries = parse_log_terse(result)[-RECENT_LOG_ENTRIES:]
+    return render_json(entries, scope="logs")

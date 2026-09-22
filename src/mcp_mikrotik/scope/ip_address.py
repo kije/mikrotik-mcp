@@ -4,7 +4,7 @@ from ..connector import execute_mikrotik_command
 from mcp.server.mcpserver import Context
 from ..app import mcp, READ, WRITE, DESTRUCTIVE, annotate
 from ..docs_refs import doc_url
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 @mcp.tool(name="add_ip_address", annotations=annotate(WRITE, "Add IP Address"))
 async def mikrotik_add_ip_address(
@@ -68,17 +68,17 @@ async def mikrotik_list_ip_addresses(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/address
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/address/
     """
     await ctx.info(f"Listing IP addresses with filters: interface={interface_filter}, address={address_filter}")
 
     filters = []
     if interface_filter:
-        filters.append(f'interface="{interface_filter}"')
+        filters.append(f'interface={ros_str(interface_filter)}')
     if address_filter:
-        filters.append(f'address~"{address_filter}"')
+        filters.append(f'address~{ros_str(address_filter)}')
     if network_filter:
-        filters.append(f'network="{network_filter}"')
+        filters.append(f'network={ros_str(network_filter)}')
     if disabled_only:
         filters.append("disabled=yes")
     if dynamic_only:
@@ -107,7 +107,7 @@ async def mikrotik_get_ip_address(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/address
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/address/
     """
     await ctx.info(f"Getting IP address details: address_id={address_id}")
 
@@ -115,7 +115,7 @@ async def mikrotik_get_ip_address(
     selector = None
     for field in (".id", "address"):
         count = await execute_mikrotik_command(
-            f'/ip address print count-only where {field}="{address_id}"', ctx
+            f'/ip address print count-only where {field}={ros_str(address_id)}', ctx
         )
         if count.strip().isdigit() and int(count.strip()) > 0:
             selector = f'{field}="{address_id}"'
@@ -140,7 +140,7 @@ async def mikrotik_remove_ip_address(ctx: Context, address_id: str) -> str:
     await ctx.info(f"Removing IP address: address_id={address_id}")
 
     # Try to find by ID first
-    check_cmd = f'/ip address print count-only where .id="{address_id}"'
+    check_cmd = f'/ip address print count-only where .id={ros_str(address_id)}'
     count = await execute_mikrotik_command(check_cmd, ctx)
 
     if count.strip() == "0":

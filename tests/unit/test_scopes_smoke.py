@@ -3,6 +3,7 @@ import inspect
 
 import pytest
 
+from mcp_mikrotik import routeros
 from tests.conftest import FakeExecutor, make_dummy_value
 
 
@@ -45,9 +46,12 @@ BROKEN_WRAPPER_FUNCS = {
 def test_scope_module_functions_return_string(module_name, ctx, monkeypatch):
     module = __import__(f"mcp_mikrotik.scope.{module_name}", fromlist=["*"])
 
-    # Patch module-level executor (each scope imports it directly)
+    # Patch module-level executor (each scope imports it directly), and the
+    # one routeros.print_resource uses — otherwise the converted list/get
+    # tools would attempt a real SSH connection.
     fake = FakeExecutor()
     monkeypatch.setattr(module, "execute_mikrotik_command", fake, raising=True)
+    monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
 
     # Run every coroutine function once with dummy args.
     for name, fn in inspect.getmembers(module, inspect.iscoroutinefunction):

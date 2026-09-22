@@ -2,7 +2,7 @@ from typing import Literal, Optional
 from mcp.server.mcpserver import Context
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
 from ..connector import execute_mikrotik_command
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 
 # ───────────────────────────────────────────────
@@ -156,15 +156,15 @@ async def mikrotik_list_queue_types(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple
+    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/type/
     """
     await ctx.info("Listing queue types")
 
     filters = []
     if name_filter:
-        filters.append(f'name~"{name_filter}"')
+        filters.append(f'name~{ros_str(name_filter)}')
     if kind_filter:
-        filters.append(f"kind={kind_filter}")
+        filters.append(f"kind={ros_str(kind_filter)}")
 
     return await print_resource(
         ctx,
@@ -172,7 +172,7 @@ async def mikrotik_list_queue_types(
         where=filters,
         proplist=proplist,
         output=output,
-        scope="queue",
+        scope="queue_type",
         empty_message="No queue types found matching the criteria.",
     )
 
@@ -190,17 +190,17 @@ async def mikrotik_get_queue_type(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple
+    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/type/
     """
     await ctx.info(f"Getting queue type details: name={name}")
 
     return await print_resource(
         ctx,
         "/queue type",
-        where=[f'name="{name}"'],
+        where=[f'name={ros_str(name)}'],
         proplist=proplist,
         output=output,
-        scope="queue",
+        scope="queue_type",
         empty_message=f"Queue type '{name}' not found.",
     )
 
@@ -381,15 +381,15 @@ async def mikrotik_list_queue_trees(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple
+    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/tree/
     """
     await ctx.info("Listing queue trees")
 
     filters = []
     if name_filter:
-        filters.append(f'name~"{name_filter}"')
+        filters.append(f'name~{ros_str(name_filter)}')
     if parent_filter:
-        filters.append(f'parent="{parent_filter}"')
+        filters.append(f'parent={ros_str(parent_filter)}')
     if disabled_only:
         filters.append("disabled=yes")
     if invalid_only:
@@ -401,7 +401,7 @@ async def mikrotik_list_queue_trees(
         where=filters,
         proplist=proplist,
         output=output,
-        scope="queue",
+        scope="queue_tree",
         empty_message="No queue trees found matching the criteria.",
     )
 
@@ -419,17 +419,17 @@ async def mikrotik_get_queue_tree(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple
+    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/tree/
     """
     await ctx.info(f"Getting queue tree details: name={name}")
 
     return await print_resource(
         ctx,
         "/queue tree",
-        where=[f'name="{name}"'],
+        where=[f'name={ros_str(name)}'],
         proplist=proplist,
         output=output,
-        scope="queue",
+        scope="queue_tree",
         empty_message=f"Queue tree '{name}' not found.",
     )
 
@@ -655,15 +655,15 @@ async def mikrotik_list_simple_queues(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple
+    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple/
     """
     await ctx.info("Listing simple queues")
 
     filters = []
     if name_filter:
-        filters.append(f'name~"{name_filter}"')
+        filters.append(f'name~{ros_str(name_filter)}')
     if target_filter:
-        filters.append(f'target~"{target_filter}"')
+        filters.append(f'target~{ros_str(target_filter)}')
     if disabled_only:
         filters.append("disabled=yes")
     if invalid_only:
@@ -693,14 +693,14 @@ async def mikrotik_get_simple_queue(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple
+    Docs: https://manual.mikrotik.com/docs/cli-reference/queue/simple/
     """
     await ctx.info(f"Getting simple queue details: name={name}")
 
     return await print_resource(
         ctx,
         "/queue simple",
-        where=[f'name="{name}"'],
+        where=[f'name={ros_str(name)}'],
         proplist=proplist,
         output=output,
         scope="queue",

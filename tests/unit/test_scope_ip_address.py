@@ -29,12 +29,12 @@ def test_list_default_json(ctx, monkeypatch):
     monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
 
     out = _run(m.mikrotik_list_ip_addresses(ctx))
-    assert calls[0] == "/ip address print terse show-ids without-paging"
+    assert calls[0] == "/ip address print terse show-ids without-paging; /ip address print detail where false"
     payload = json.loads(out)
     assert payload["count"] == 1
     assert payload["records"][0]["address"] == "192.168.88.1/24"
     assert payload["records"][0][".id"] == "*1"
-    assert payload["documentation"].endswith("/docs/cli-reference/ip/address")
+    assert payload["documentation"].endswith("/docs/cli-reference/ip/address/")
 
 
 def test_list_with_filters_and_proplist(ctx, monkeypatch):
@@ -105,3 +105,21 @@ def test_get_not_found(ctx, monkeypatch):
     monkeypatch.setattr(m, "execute_mikrotik_command", fake, raising=True)
     out = _run(m.mikrotik_get_ip_address(ctx, address_id="nope"))
     assert "not found" in out
+
+
+def test_list_filter_value_cannot_inject_a_command(ctx, monkeypatch):
+    from mcp_mikrotik.scope import ip_address as m
+    from mcp_mikrotik import routeros
+
+    calls = []
+
+    async def fake(cmd, _ctx=None):
+        calls.append(cmd)
+        return ""
+
+    monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
+    _run(m.mikrotik_list_ip_addresses(ctx, interface_filter='x"; /system reboot; :put "'))
+    assert calls[0] == (
+        '/ip address print terse show-ids without-paging where interface="x\\"; /system reboot; :put \\""'
+        "; /ip address print detail where false"
+    )

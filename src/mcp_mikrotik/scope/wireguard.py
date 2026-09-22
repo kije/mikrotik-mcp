@@ -4,7 +4,7 @@ from mcp.server.mcpserver import Context
 
 from ..connector import execute_mikrotik_command
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 
 # ---------------------------------------------------------------------------
@@ -70,13 +70,13 @@ async def mikrotik_list_wireguard_interfaces(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wireguard
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wireguard/
     """
     await ctx.info("Listing WireGuard interfaces")
 
     filters = []
     if name_filter:
-        filters.append(f'name~"{name_filter}"')
+        filters.append(f'name~{ros_str(name_filter)}')
     if disabled_only:
         filters.append("disabled=yes")
     if running_only:
@@ -106,14 +106,14 @@ async def mikrotik_get_wireguard_interface(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wireguard
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wireguard/
     """
     await ctx.info(f"Getting WireGuard interface details: name={name}")
 
     return await print_resource(
         ctx,
         "/interface wireguard",
-        where=[f'name="{name}"'],
+        where=[f'name={ros_str(name)}'],
         proplist=proplist,
         output=output,
         scope="wireguard",
@@ -293,13 +293,13 @@ async def mikrotik_list_wireguard_peers(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wireguard
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wireguard/
     """
     await ctx.info("Listing WireGuard peers")
 
     filters = []
     if interface_filter:
-        filters.append(f'interface="{interface_filter}"')
+        filters.append(f'interface={ros_str(interface_filter)}')
     if disabled_only:
         filters.append("disabled=yes")
 
@@ -330,14 +330,14 @@ async def mikrotik_get_wireguard_peer(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wireguard
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wireguard/
     """
     await ctx.info(f"Getting WireGuard peer details: peer_id={peer_id}")
 
     return await print_resource(
         ctx,
         "/interface wireguard peers",
-        where=[f".id={peer_id}"],
+        where=[f".id={ros_str(peer_id)}"],
         proplist=proplist,
         output=output,
         scope="wireguard",
@@ -413,7 +413,7 @@ async def mikrotik_remove_wireguard_peer(ctx: Context, peer_id: str) -> str:
     """
     await ctx.info(f"Removing WireGuard peer: peer_id={peer_id}")
 
-    check_cmd = f"/interface wireguard peers print count-only where .id={peer_id}"
+    check_cmd = f"/interface wireguard peers print count-only where .id={ros_str(peer_id)}"
     count = await execute_mikrotik_command(check_cmd, ctx)
 
     if count.strip() == "0":

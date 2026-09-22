@@ -3,7 +3,7 @@ from ..connector import execute_mikrotik_command
 from mcp.server.mcpserver import Context
 import re
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 @mcp.tool(name="add_user", annotations=annotate(WRITE, "Add User"))
 async def mikrotik_add_user(
@@ -76,15 +76,15 @@ async def mikrotik_list_users(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/user
+    Docs: https://manual.mikrotik.com/docs/cli-reference/user/
     """
     await ctx.info(f"Listing users with filters: name={name_filter}, group={group_filter}")
 
     filters = []
     if name_filter:
-        filters.append(f'name~"{name_filter}"')
+        filters.append(f'name~{ros_str(name_filter)}')
     if group_filter:
-        filters.append(f'group="{group_filter}"')
+        filters.append(f'group={ros_str(group_filter)}')
     if disabled_only:
         filters.append("disabled=yes")
 
@@ -111,14 +111,14 @@ async def mikrotik_get_user(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/user
+    Docs: https://manual.mikrotik.com/docs/cli-reference/user/
     """
     await ctx.info(f"Getting user details: name={name}")
 
     return await print_resource(
         ctx,
         "/user",
-        where=[f'name="{name}"'],
+        where=[f'name={ros_str(name)}'],
         proplist=proplist,
         output=output,
         scope="users",
@@ -283,15 +283,15 @@ async def mikrotik_list_user_groups(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/user
+    Docs: https://manual.mikrotik.com/docs/cli-reference/user/
     """
     await ctx.info(f"Listing user groups with filters: name={name_filter}")
 
     filters = []
     if name_filter:
-        filters.append(f'name~"{name_filter}"')
+        filters.append(f'name~{ros_str(name_filter)}')
     if policy_filter:
-        filters.append(f'policy~"{policy_filter}"')
+        filters.append(f'policy~{ros_str(policy_filter)}')
 
     return await print_resource(
         ctx,
@@ -316,14 +316,14 @@ async def mikrotik_get_user_group(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/user
+    Docs: https://manual.mikrotik.com/docs/cli-reference/user/
     """
     await ctx.info(f"Getting user group details: name={name}")
 
     return await print_resource(
         ctx,
         "/user group",
-        where=[f'name="{name}"'],
+        where=[f'name={ros_str(name)}'],
         proplist=proplist,
         output=output,
         scope="users",

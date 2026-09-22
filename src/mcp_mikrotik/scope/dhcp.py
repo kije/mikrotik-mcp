@@ -4,7 +4,7 @@ from mcp.server.mcpserver import Context
 
 from ..app import mcp, READ, WRITE, DESTRUCTIVE, annotate
 from ..connector import execute_mikrotik_command
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 
 @mcp.tool(name="create_dhcp_server", annotations=annotate(WRITE, "Create DHCP Server"))
@@ -77,15 +77,15 @@ async def mikrotik_list_dhcp_servers(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/dhcp-server
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/dhcp-server/
     """
     await ctx.info(f"Listing DHCP servers with filters: name={name_filter}, interface={interface_filter}")
 
     filters = []
     if name_filter:
-        filters.append(f'name~"{name_filter}"')
+        filters.append(f'name~{ros_str(name_filter)}')
     if interface_filter:
-        filters.append(f'interface="{interface_filter}"')
+        filters.append(f'interface={ros_str(interface_filter)}')
     if disabled_only:
         filters.append("disabled=yes")
     if invalid_only:
@@ -114,14 +114,14 @@ async def mikrotik_get_dhcp_server(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/dhcp-server
+    Docs: https://manual.mikrotik.com/docs/cli-reference/ip/dhcp-server/
     """
     await ctx.info(f"Getting DHCP server details: name={name}")
 
     return await print_resource(
         ctx,
         "/ip dhcp-server",
-        where=[f'name="{name}"'],
+        where=[f'name={ros_str(name)}'],
         proplist=proplist,
         output=output,
         scope="dhcp",

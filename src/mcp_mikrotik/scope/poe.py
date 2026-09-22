@@ -2,7 +2,7 @@ from typing import Optional
 from ..connector import execute_mikrotik_command
 from mcp.server.mcpserver import Context
 from ..app import mcp, READ, annotate
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 
 @mcp.tool(name="get_poe_monitor", annotations=annotate(READ, "PoE Monitor"))
@@ -53,13 +53,13 @@ async def mikrotik_list_poe(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/hardware/poe-out
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/ethernet/poe/
     """
     await ctx.info("Listing PoE configuration")
 
     filters = []
     if interface_filter:
-        filters.append(f'name~"{interface_filter}"')
+        filters.append(f'name~{ros_str(interface_filter)}')
 
     return await print_resource(
         ctx,
@@ -92,14 +92,14 @@ async def mikrotik_get_poe_settings(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/hardware/poe-out
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/ethernet/poe/
     """
     await ctx.info(f"Getting PoE settings for: {name}")
 
     return await print_resource(
         ctx,
         "/interface ethernet poe",
-        where=[f'name="{name}"'],
+        where=[f'name={ros_str(name)}'],
         proplist=proplist,
         output=output,
         scope="poe",

@@ -30,7 +30,7 @@ class FakeExecutor:
     Heuristic fake for execute_mikrotik_command.
 
     - count-only queries return "1" (exists)
-    - print/detail queries return a non-empty payload
+    - terse prints return one parseable record, other prints a non-empty payload
     - mutating commands return "" (success)
     """
 
@@ -43,6 +43,8 @@ class FakeExecutor:
         cmd = command.lower()
         if "count-only" in cmd:
             return "1"
+        if "print terse" in cmd:
+            return "*1 X name=test comment=some mikrotik output\r\n"
         if "print" in cmd:
             return "some mikrotik output"
         return ""

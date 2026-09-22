@@ -3,7 +3,7 @@ from typing import List, Literal, Optional, Dict, Any
 from ..connector import execute_mikrotik_command
 from mcp.server.mcpserver import Context
 from ..app import mcp, READ, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, annotate
-from ..routeros import OutputFormat, print_resource
+from ..routeros import OutputFormat, print_resource, ros_str
 
 
 async def mikrotik_detect_wireless_interface_type(ctx: Context) -> Optional[str]:
@@ -160,7 +160,7 @@ async def mikrotik_list_wireless_interfaces(
     The wireless menu path is auto-detected across RouterOS versions
     (``/interface wifi`` and ``wifiwave2`` on v7, ``/interface wireless`` on v6).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi/
     """
     await ctx.info(f"Listing wireless interfaces with filters: name={name_filter}")
 
@@ -170,7 +170,7 @@ async def mikrotik_list_wireless_interfaces(
 
     filters = []
     if name_filter:
-        filters.append(f'name~"{name_filter}"')
+        filters.append(f'name~{ros_str(name_filter)}')
     if disabled_only:
         filters.append("disabled=yes")
     if running_only:
@@ -202,7 +202,7 @@ async def mikrotik_get_wireless_interface(
 
     The wireless menu path is auto-detected across RouterOS v6/v7.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi/
     """
     await ctx.info(f"Getting wireless interface details: name={name}")
 
@@ -213,7 +213,7 @@ async def mikrotik_get_wireless_interface(
     return await print_resource(
         ctx,
         interface_type,
-        where=[f'name="{name}"'],
+        where=[f'name={ros_str(name)}'],
         proplist=proplist,
         output=output,
         scope="wireless",
@@ -421,7 +421,7 @@ async def mikrotik_list_wireless_security_profiles(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi/
     """
     await ctx.info("Listing wireless security profiles")
 
@@ -449,14 +449,14 @@ async def mikrotik_get_wireless_security_profile(
       ``terse`` (one-line) | ``raw``.
     - ``proplist``: comma-separated fields to return.
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi/
     """
     await ctx.info(f"Getting wireless security profile details: name={name}")
 
     return await print_resource(
         ctx,
         "/interface wireless security-profiles",
-        where=[f'name="{name}"'],
+        where=[f'name={ros_str(name)}'],
         proplist=proplist,
         output=output,
         scope="wireless",
@@ -509,7 +509,7 @@ async def mikrotik_list_wireless_access_list(
     - ``output``: ``json`` (default, parsed) | ``terse`` (raw one-line records) |
       ``detail`` (verbose) | ``raw`` (legacy plain ``print``).
 
-    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi
+    Docs: https://manual.mikrotik.com/docs/cli-reference/interface/wifi/
     """
     await ctx.info("Listing wireless access list entries")
 

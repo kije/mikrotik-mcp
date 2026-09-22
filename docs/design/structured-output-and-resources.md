@@ -22,11 +22,49 @@ output machine-friendly via `terse`, `proplist`, `show-ids`, and JSON parsing.
 Rather than editing ~170 call sites divergently, the logic is centralized in
 `src/mcp_mikrotik/routeros.py`:
 
-- `build_print_command(path, where, proplist, terse, show_ids, detail, count_only, limit)`
-- `parse_terse(output)` — tokenizer that respects quoted values, decodes the
-  `Flags:` legend, and attaches `_index` / `_flags`.
+- `build_print_command(path, where, proplist, terse, show_ids, detail, count_only)`
+  — `where` is always last (RouterOS reads the rest of the line as the filter);
+  `proplist` names are validated because they are spliced in unquoted.
+- `ros_str(value)` — quotes/escapes a caller-supplied value for a `where`
+  predicate (`"`, `\`, `$`, `?`, control characters).
+- `parse_terse(output)` — turns `print terse show-ids` lines into dicts
+  (`.id` from the leading column, fields split at each `key=`, flag symbols
+  decoded into `_flags`), and raises `RouterOSError` on any line that is not a
+  record, so device errors are never mistaken for an empty result.
 - `print_resource(ctx, path, where, proplist, output, …)` — the single entry
-  point tools delegate to. `output ∈ {json, terse, detail, raw}`.
+  point tools delegate to. `output ∈ {json, terse, detail, raw}`. In `json`
+  mode it chains `<path> print detail where false` onto the same exec to get
+  the flag legend, which terse output omits.
+
+### What terse output actually looks like
+
+Verified against a RouterOS 7.19.4 CHR (raw captures and the device's own
+JSON serialisation of the same records are in
+`tests/fixtures/routeros-7.19.4.json`; `tests/unit/test_routeros_real_output.py`
+checks every value against it):
+
+```
+*80000003  As dst-address=10.98.0.0/16 routing-table=main blackhole immediate-gw= distance=1
+*2    comment=LAN side "main" address=192.168.50.1/24 interface=ether2
+```
+
+- With `show-ids` the id **replaces** the index column; there is no `.id=` field.
+- Values are neither quoted nor escaped, so a value ends at the next `key=`
+  token. A free-text value that itself contains ` word=` (a comment such as
+  `"set x=1"`) is therefore ambiguous and will be split there — terse output
+  cannot represent it unambiguously; use `output="detail"` for such fields.
+- Some properties are printed as a bare word when set (`blackhole`); these are
+  listed in `routeros.VALUELESS_PROPERTIES`.
+- There is no `Flags:` legend line.
+- `/log print terse` is positional (`*id time topics message`), not
+  `key=value`, and has its own parser (`parse_log_terse`).
+- `print` has no `limit=` argument; `mikrotik://logs/recent` takes its tail
+  client-side.
+
+`print as-value` + `:serialize to=json` was evaluated as an exact alternative
+and rejected: it drops flag properties (`disabled`, `dynamic`) unless they are
+named in a `proplist`, renders durations as epoch timestamps, and
+`:serialize` does not exist on RouterOS v6.
 
 Doc references live in `src/mcp_mikrotik/docs_refs.py`; resources in
 `src/mcp_mikrotik/resources.py`. `connector.execute_mikrotik_command` now accepts

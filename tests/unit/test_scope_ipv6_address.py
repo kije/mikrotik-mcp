@@ -80,7 +80,9 @@ def test_list_no_filters(ctx, monkeypatch):
     monkeypatch.setattr(routeros, "execute_mikrotik_command", fake, raising=True)
 
     _run(m.mikrotik_list_ipv6_addresses(ctx))
-    assert fake.commands[0] == "/ipv6 address print terse show-ids without-paging"
+    assert fake.commands[0] == (
+        "/ipv6 address print terse show-ids without-paging; /ipv6 address print detail where false"
+    )
 
 
 def test_list_with_filters(ctx, monkeypatch):
@@ -115,6 +117,7 @@ def test_list_link_local_filter(ctx, monkeypatch):
     _run(m.mikrotik_list_ipv6_addresses(ctx, link_local_only=True))
     assert fake.commands[0] == (
         "/ipv6 address print terse show-ids without-paging where link-local=yes"
+        "; /ipv6 address print detail where false"
     )
 
 
