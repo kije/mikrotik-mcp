@@ -6,14 +6,12 @@ import pytest
 def test_server_main_runs_mcp(monkeypatch):
     from mcp_mikrotik import server
 
-    calls = {"run": 0}
+    calls = {"run": 0, "kwargs": None}
 
     class FakeMcp:
-        def __init__(self):
-            self.settings = types.SimpleNamespace(host=None, port=None)
-
-        def run(self, transport: str):
+        def run(self, transport: str, **kwargs):
             calls["run"] += 1
+            calls["kwargs"] = kwargs
             assert transport == "stdio"
 
     cfg = types.SimpleNamespace(
@@ -28,18 +26,53 @@ def test_server_main_runs_mcp(monkeypatch):
 
     server.main()
     assert calls["run"] == 1
-    assert server.mcp.settings.host == "127.0.0.1"
-    assert server.mcp.settings.port == 8123
+    # mcp 2.x: run(transport="stdio") accepts no transport keywords, so main()
+    # must not forward host/port/transport_security on the stdio path.
+    assert calls["kwargs"] == {}
+
+
+def test_server_main_passes_transport_config_to_run_for_http(monkeypatch):
+    """mcp 2.x moved host/port/transport_security from settings onto run()."""
+    from mcp_mikrotik import server
+
+    calls = {"kwargs": None}
+
+    class FakeMcp:
+        def run(self, transport: str, **kwargs):
+            assert transport == "streamable-http"
+            calls["kwargs"] = kwargs
+
+    cfg = types.SimpleNamespace(
+        host="10.0.0.1",
+        username="admin",
+        key_filename=None,
+        mcp=types.SimpleNamespace(
+            host="0.0.0.0",
+            port=8123,
+            transport="streamable-http",
+            allowed_hosts="mcp.example.com",
+            allowed_origins="",
+        ),
+    )
+
+    monkeypatch.setattr(server, "MikrotikConfig", lambda _cli_parse_args=True: cfg)
+    monkeypatch.setattr(server, "mcp", FakeMcp())
+
+    server.main()
+
+    kwargs = calls["kwargs"]
+    assert kwargs["host"] == "0.0.0.0"
+    assert kwargs["port"] == 8123
+    sec = kwargs["transport_security"]
+    assert sec.enable_dns_rebinding_protection is True
+    assert sec.allowed_hosts == ["mcp.example.com"]
 
 
 def test_server_main_exits_on_exception(monkeypatch):
     from mcp_mikrotik import server
 
     class FakeMcp:
-        def __init__(self):
-            self.settings = types.SimpleNamespace(host=None, port=None)
-
-        def run(self, transport: str):
+        def run(self, transport: str, **kwargs):
             raise RuntimeError("boom")
 
     cfg = types.SimpleNamespace(
@@ -186,10 +219,7 @@ def test_server_main_handles_keyboard_interrupt(monkeypatch):
     from mcp_mikrotik import server
 
     class FakeMcp:
-        def __init__(self):
-            self.settings = types.SimpleNamespace(host=None, port=None)
-
-        def run(self, transport: str):
+        def run(self, transport: str, **kwargs):
             raise KeyboardInterrupt()
 
     cfg = types.SimpleNamespace(

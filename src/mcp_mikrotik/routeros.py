@@ -26,7 +26,7 @@ import json
 import re
 from typing import Dict, List, Literal, Optional, Sequence
 
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 
 from .connector import execute_mikrotik_command
 from .docs_refs import doc_url

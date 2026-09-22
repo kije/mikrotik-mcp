@@ -11,7 +11,7 @@ output machine-friendly via `terse`, `proplist`, `show-ids`, and JSON parsing.
 |-----|---------|----------|
 | Doc references per config object | ✅ Sensible | `docs_refs.SCOPE_DOCS` maps each scope → `manual.mikrotik.com` page. Surfaced in JSON responses + as resources, **not** in every tool description (avoids prompt bloat across 170+ tools). |
 | MCP resources | ✅ Sensible | Two kinds: **docs** (`mikrotik://docs`, `mikrotik://docs/{scope}`) and **config snapshots** (`mikrotik://ip/address`). |
-| Log subscriptions | ⚠️ Deferred | MCP subscriptions are *notify-then-refetch*, and FastMCP has no ergonomic decorator for server-initiated `resources/updated`. A true version needs a background poll-and-diff task on the low-level session. Shipped a **pollable** `mikrotik://logs/recent` resource instead. |
+| Log subscriptions | ⚠️ Deferred | MCP subscriptions are *notify-then-refetch*, and the SDK has no ergonomic decorator for server-initiated `resources/updated`. A true version needs a background poll-and-diff task on the low-level session. Shipped a **pollable** `mikrotik://logs/recent` resource instead. |
 | `terse` output | ✅ Sensible | Default internal format for list/print — one record per line, easy to parse. |
 | `proplist=` | ✅ Sensible | Exposed as a `proplist` tool argument; client selects fields. |
 | `show-ids` | ✅ Sensible | On by default for `json`/`terse`/`detail`; every record carries `.id` for follow-up ops. |
