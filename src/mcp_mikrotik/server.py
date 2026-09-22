@@ -58,9 +58,10 @@ def _build_transport_security(
     Why this is needed (issue #86): the MCP SDK defaults its DNS-rebinding
     protection to a localhost-only Host allowlist. When the server is bound to a
     non-localhost host (e.g. ``0.0.0.0`` in a container) and fronted by a reverse
-    proxy, that localhost allowlist rejects every real request to ``/mcp`` with
+    proxy, a localhost allowlist rejects every real request to ``/mcp`` with
     HTTP 421 "Invalid Host header". Here we reconcile the protection settings
-    with the actual runtime host and any user-provided allowlist.
+    with the actual runtime host and any user-provided allowlist, and pass the
+    result to ``run()`` (mcp 2.x moved this off the constructor/settings).
 
     Resolution order:
       1. ``allowed_hosts`` contains "*"        -> protection disabled (explicit opt-out)

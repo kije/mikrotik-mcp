@@ -1,8 +1,15 @@
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
 from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import Response
 
 from .configured_mcp_server import ConfiguredMCPServer
+
+try:
+    _VERSION = _pkg_version("mcp-server-mikrotik")
+except PackageNotFoundError:  # running from a source tree without an install
+    _VERSION = "0.0.0.dev0"
 
 # Sent once, in the initialize response, instead of being repeated in all 192
 # tool descriptions — the same guidance costs ~60 tokens here rather than ~4k.
@@ -14,7 +21,8 @@ INSTRUCTIONS = (
     "unknown device returns an error naming the valid titles."
 )
 
-mcp = ConfiguredMCPServer("mcp-mikrotik", instructions=INSTRUCTIONS)
+# mcp 2.x reports an empty serverInfo.version unless one is passed.
+mcp = ConfiguredMCPServer("mcp-mikrotik", version=_VERSION, instructions=INSTRUCTIONS)
 
 # ── Behaviour presets ──────────────────────────────────────────────────────
 # These capture the *risk profile* of a tool (MCP spec §Tool Annotations).
@@ -40,13 +48,7 @@ def annotate(base: ToolAnnotations, title: str) -> ToolAnnotations:
         @mcp.tool(name="get_dns_settings", annotations=annotate(READ, "DNS Settings"))
         async def mikrotik_get_dns_settings(ctx: Context) -> str: ...
     """
-    return ToolAnnotations(
-        title=title,
-        read_only_hint=base.read_only_hint,
-        destructive_hint=base.destructive_hint,
-        idempotent_hint=base.idempotent_hint,
-        open_world_hint=base.open_world_hint,
-    )
+    return base.model_copy(update={"title": title})
 
 
 # Only available on HTTP transports (sse, streamable-http)

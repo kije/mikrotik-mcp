@@ -16,7 +16,7 @@ from mcp_mikrotik.scope.users import mikrotik_add_user, mikrotik_list_users, mik
 
 
 def _make_ctx():
-    """Create a mock FastMCP Context for direct tool function calls."""
+    """Create a mock MCPServer Context for direct tool function calls."""
     ctx = MagicMock()
     ctx.info = AsyncMock()
     ctx.debug = AsyncMock()
